@@ -477,8 +477,8 @@ static int run_job(struct restart_info *restart, const char *cmdtype,
 		if (gs.loglevel > LOG_DEBUG + 1)
 			zlog_debug(
 				"postponing %s %s: "
-				"elapsed time %ld < retry interval %ld",
-				cmdtype, restart->name, (long)delay.tv_sec,
+				"elapsed time %ld < retry interval %lld",
+				cmdtype, restart->name, (uint64_t)delay.tv_sec,
 				restart->interval);
 		return -1;
 	}
