@@ -7,6 +7,7 @@
 #include "lib/privs.h"
 
 DECLARE_MGROUP(ATTACHD);
+DECLARE_MGROUP(DHCP6);
 
 struct event_loop;
 
@@ -18,5 +19,10 @@ extern void attachd_vrf_init(void);
 extern void attachd_if_init(void);
 
 extern void rtadv_init(void);
+
+extern void dhcp6r_if_init(void);
+extern void dhcp6r_zebra_init(void);
+extern void dhcp6_state_init(void);
+extern void dhcp6_upstream_init(void);
 
 #endif /* _FRR_ATTACHD_H */
