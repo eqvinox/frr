@@ -19,6 +19,14 @@
 #ifndef _FRR_ACCESSD_ZEBRA_H
 #define _FRR_ACCESSD_ZEBRA_H
 
-/* nothing here for now */
+#include "lib/hook.h"
+
+struct connected;
+struct zclient;
+
+extern struct zclient *zclient;
+
+DECLARE_HOOK(accessd_if_addr_add, (struct connected *c), (c));
+DECLARE_KOOH(accessd_if_addr_del, (struct connected *c), (c));
 
 #endif /* _FRR_DHCP6_ZEBRA_H */
