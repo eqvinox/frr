@@ -273,6 +273,7 @@ struct rtadv_prefix {
 	struct rtadv_prefix *superseding;
 
 	/* The value to be placed in the Valid Lifetime in the Prefix */
+	struct timeval valid_until;
 	uint32_t AdvValidLifetime;
 #define RTADV_VALID_LIFETIME 2592000
 
@@ -281,6 +282,7 @@ struct rtadv_prefix {
 
 	/* The value to be placed in the Preferred Lifetime in the Prefix
 	   Information option, in seconds.*/
+	struct timeval prefer_until;
 	uint32_t AdvPreferredLifetime;
 #define RTADV_PREFERRED_LIFETIME 604800
 
@@ -292,6 +294,8 @@ struct rtadv_prefix {
 #ifndef ND_OPT_PI_FLAG_RADDR
 #define ND_OPT_PI_FLAG_RADDR         0x20
 #endif
+
+	struct zserv *client;
 };
 
 /* RFC4861 minimum delay between RAs  */

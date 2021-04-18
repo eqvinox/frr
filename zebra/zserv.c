@@ -699,6 +699,8 @@ void zserv_close_client(struct zserv *client)
 		}
 	}
 
+	rtadv_zserv_clear(client);
+
 	/* delete client */
 	if (free_p)
 		zserv_client_free(client);
