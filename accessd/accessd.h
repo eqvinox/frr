@@ -29,4 +29,8 @@ struct thread_master;
 extern struct thread_master *master;
 extern struct zebra_privs_t accessd_privs;
 
+extern void accessd_zebra_init(void);
+extern void accessd_vrf_init(void);
+extern void accessd_if_init(void);
+
 #endif /* _FRR_ACCESSD_H */
