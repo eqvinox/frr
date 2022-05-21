@@ -391,8 +391,6 @@ extern void zread_client_capabilities(struct zserv *client, struct zmsghdr *hdr,
 				      struct stream *msg,
 				      struct zebra_vrf *zvrf);
 
-extern void rtadv_zserv_clear(struct zserv *client);
-
 #ifdef __cplusplus
 }
 #endif
