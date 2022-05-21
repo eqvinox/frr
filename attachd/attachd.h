@@ -13,4 +13,8 @@ struct event_loop;
 extern struct event_loop *master;
 extern struct zebra_privs_t attachd_privs;
 
+extern void attachd_zebra_init(void);
+extern void attachd_vrf_init(void);
+extern void attachd_if_init(void);
+
 #endif /* _FRR_ATTACHD_H */

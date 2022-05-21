@@ -125,7 +125,9 @@ int main(int argc, char **argv, char **envp)
 
 	master = frr_init();
 
-	vrf_init(NULL, NULL, NULL, NULL);
+	attachd_zebra_init();
+	attachd_vrf_init();
+	attachd_if_init();
 
 	frr_config_fork();
 	frr_run(master);
