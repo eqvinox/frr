@@ -498,7 +498,8 @@ void if_addr_wakeup(struct interface *ifp)
 	for (ALL_LIST_ELEMENTS(ifp->connected, node, nnode, ifc)) {
 		p = ifc->address;
 
-		if (CHECK_FLAG(ifc->conf, ZEBRA_IFC_CONFIGURED)
+		if ((CHECK_FLAG(ifc->conf, ZEBRA_IFC_CONFIGURED)
+		     || ifc->zapi_count)
 		    && !CHECK_FLAG(ifc->conf, ZEBRA_IFC_QUEUED)) {
 			/* Address check. */
 			if (p->family == AF_INET) {
@@ -727,7 +728,8 @@ static void if_delete_connected(struct interface *ifp)
 					/* Remove from interface address list
 					 * (unconditionally). */
 					if (!CHECK_FLAG(ifc->conf,
-							ZEBRA_IFC_CONFIGURED)) {
+							ZEBRA_IFC_CONFIGURED) &&
+					    !ifc->zapi_count) {
 						listnode_delete(ifp->connected,
 								ifc);
 						connected_free(&ifc);
@@ -747,7 +749,8 @@ static void if_delete_connected(struct interface *ifp)
 			UNSET_FLAG(ifc->conf, ZEBRA_IFC_REAL);
 			UNSET_FLAG(ifc->conf, ZEBRA_IFC_QUEUED);
 
-			if (CHECK_FLAG(ifc->conf, ZEBRA_IFC_CONFIGURED))
+			if (CHECK_FLAG(ifc->conf, ZEBRA_IFC_CONFIGURED) ||
+			    ifc->zapi_count)
 				last = node;
 			else {
 				listnode_delete(ifp->connected, ifc);
@@ -3991,6 +3994,9 @@ int if_ip_address_uinstall(struct interface *ifp, struct prefix *prefix)
 	}
 	UNSET_FLAG(ifc->conf, ZEBRA_IFC_CONFIGURED);
 
+	if (ifc->zapi_count)
+		return 0;
+
 	/* This is not real address or interface is not active. */
 	if (!CHECK_FLAG(ifc->conf, ZEBRA_IFC_QUEUED)
 	    || !CHECK_FLAG(ifp->status, ZEBRA_INTERFACE_ACTIVE)) {
@@ -4053,6 +4059,8 @@ static int ip_address_uninstall(struct vty *vty, struct interface *ifp,
 		return CMD_WARNING_CONFIG_FAILED;
 
 	UNSET_FLAG(ifc->conf, ZEBRA_IFC_CONFIGURED);
+	if (ifc->zapi_count)
+		return 0;
 
 	/* This is not real address or interface is not active. */
 	if (!CHECK_FLAG(ifc->conf, ZEBRA_IFC_QUEUED)
@@ -4343,6 +4351,9 @@ static int ipv6_address_uninstall(struct vty *vty, struct interface *ifp,
 		return CMD_WARNING_CONFIG_FAILED;
 
 	UNSET_FLAG(ifc->conf, ZEBRA_IFC_CONFIGURED);
+
+	if (ifc->zapi_count)
+		return 0;
 
 	/* This is not real address or interface is not active. */
 	if (!CHECK_FLAG(ifc->conf, ZEBRA_IFC_QUEUED)
