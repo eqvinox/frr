@@ -63,6 +63,7 @@
 #include "zebra/zserv.h"          /* for zserv */
 #include "zebra/zebra_router.h"
 #include "zebra/zebra_errors.h"   /* for error messages */
+#include "zebra/interface.h"
 /* clang-format on */
 
 /* privileges */
@@ -747,6 +748,7 @@ static struct zserv *zserv_client_create(int sock)
 	pthread_mutex_init(&client->obuf_mtx, NULL);
 	client->wb = buffer_new(0);
 	TAILQ_INIT(&(client->gr_info_queue));
+	if_addr_zapi_init(client);
 
 	atomic_store_explicit(&client->connect_time, (uint32_t) monotime(NULL),
 			      memory_order_relaxed);

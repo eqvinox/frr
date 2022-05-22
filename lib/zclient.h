@@ -239,6 +239,8 @@ typedef enum {
 	ZEBRA_GRE_GET,
 	ZEBRA_GRE_UPDATE,
 	ZEBRA_GRE_SOURCE_SET,
+	ZEBRA_INTERFACE_ADDRESS_INSTALL,
+	ZEBRA_INTERFACE_ADDRESS_UNINSTALL,
 } zebra_message_types_t;
 
 enum zebra_error_types {

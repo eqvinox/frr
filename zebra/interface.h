@@ -314,6 +314,11 @@ extern int if_multicast_unset(struct interface *ifp);
 extern int if_linkdetect(struct interface *ifp, bool detect);
 extern void if_addr_wakeup(struct interface *ifp);
 
+extern void if_addr_zapi_init(struct zserv *client);
+extern void if_addr_zapi(struct zserv *client, struct interface *ifp,
+			 struct prefix *p, bool create);
+extern void if_addr_zapi_fini(struct zserv *client);
+
 /* Nexthop group connected functions */
 extern void if_nhg_dependents_add(struct interface *ifp,
 				  struct nhg_hash_entry *nhe);
