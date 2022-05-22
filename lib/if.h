@@ -459,6 +459,9 @@ struct connected {
 	 * "struct interface"
 	 */
 	uint32_t metric;
+
+	/* Counted up/down when this address is [un]installed via ZAPI */
+	unsigned int zapi_count;
 };
 
 DECLARE_DLIST(if_connected, struct connected, item);
