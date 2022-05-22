@@ -20,6 +20,7 @@ DEFINE_MGROUP(NHRPD, "buffer management");
 
 static zebra_capabilities_t _caps_p[] = {
 	ZCAP_BIND,
+	ZCAP_NET_RAW,
 };
 
 struct zebra_privs_t attachd_privs = {
@@ -128,6 +129,8 @@ int main(int argc, char **argv, char **envp)
 	attachd_zebra_init();
 	attachd_vrf_init();
 	attachd_if_init();
+
+	rtadv_init();
 
 	frr_config_fork();
 	frr_run(master);

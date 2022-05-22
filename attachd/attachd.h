@@ -17,4 +17,6 @@ extern void attachd_zebra_init(void);
 extern void attachd_vrf_init(void);
 extern void attachd_if_init(void);
 
+extern void rtadv_init(void);
+
 #endif /* _FRR_ATTACHD_H */
