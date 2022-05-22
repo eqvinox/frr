@@ -33,6 +33,9 @@
 
 DEFINE_MTYPE_STATIC(ACCESSD, ACCESSD_IF, "accessd interface information");
 
+DEFINE_HOOK(accessd_ifp_up, (struct accessd_iface *acif), (acif));
+DEFINE_KOOH(accessd_ifp_down, (struct accessd_iface *acif), (acif));
+
 static int accessd_if_new_hook(struct interface *ifp)
 {
 	struct accessd_iface *acif;
@@ -64,11 +67,13 @@ static int accessd_ifp_destroy(struct interface *ifp)
 
 static int accessd_ifp_up(struct interface *ifp)
 {
+	hook_call(accessd_ifp_up, ifp->info);
 	return 0;
 }
 
 static int accessd_ifp_down(struct interface *ifp)
 {
+	hook_call(accessd_ifp_down, ifp->info);
 	return 0;
 }
 

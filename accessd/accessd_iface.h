@@ -19,10 +19,18 @@
 #ifndef _FRR_ACCESSD_IFACE_H
 #define _FRR_ACCESSD_IFACE_H
 
+#include "lib/hook.h"
+
 struct interface;
+struct rtadv_iface;
 
 struct accessd_iface {
 	struct interface *ifp;
+
+	struct rtadv_iface *rtadv;
 };
+
+DECLARE_HOOK(accessd_ifp_up, (struct accessd_iface *acif), (acif));
+DECLARE_KOOH(accessd_ifp_down, (struct accessd_iface *acif), (acif));
 
 #endif /* _FRR_ACCESSD_IFACE_H */
