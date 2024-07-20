@@ -332,7 +332,7 @@ DEFPY (ipv6_nd_prefix_ac,
 		ra_prefix->cfg.preferred_sec = ~0U;
 
 	if (rta)
-		ra_prefix->cfg.router_addr = !strcmp(rta, "router-addr");
+		ra_prefix->cfg.router_addr = !strcmp(rta, "router-address");
 	if (offlink)
 		ra_prefix->cfg.onlink = !strcmp(offlink, "on-link");
 	if (auton)
