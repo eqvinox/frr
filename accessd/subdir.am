@@ -12,7 +12,7 @@ vtysh_daemons += accessd
 #man8 += $(MANBUILD)/frr-accessd.8
 endif
 
-accessd_accessd_LDADD = lib/libfrr.la $(LIBCAP)
+accessd_accessd_LDADD = lib/libfrr.la $(LIBCAP) -lmnl
 accessd_accessd_SOURCES = \
 	accessd/accessd.c \
 	accessd/accessd_iface.c \
@@ -30,6 +30,8 @@ accessd_accessd_SOURCES = \
 	accessd/rtadv.c \
 	accessd/rtadv_vty.c \
 	\
+	accessd/arp.c \
+	\
 	nhrpd/zbuf.c \
 	# end
 
@@ -44,6 +46,7 @@ noinst_HEADERS += \
 	# end
 
 clippy_scan += \
+	accessd/arp.c \
 	accessd/dhcp6_iface.c \
 	accessd/dhcp6_upstream.c \
 	accessd/lmdb.c \

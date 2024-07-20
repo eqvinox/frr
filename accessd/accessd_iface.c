@@ -39,6 +39,7 @@ static int accessd_if_new_hook(struct interface *ifp)
 
 	acif = XCALLOC(MTYPE_ACCESSD_IF, sizeof(*acif));
 	acif->ifp = ifp;
+	acif->arp_fd = -1;
 
 	ifp->info = acif;
 	return 0;

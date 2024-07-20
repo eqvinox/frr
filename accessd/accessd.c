@@ -30,6 +30,7 @@
 #include "lib/version.h"
 
 #include "accessd.h"
+#include "accessd_iface.h"
 
 DEFINE_MGROUP(ACCESSD, "accessd");
 DEFINE_MGROUP(NHRPD, "buffer management");
@@ -39,6 +40,7 @@ DEFINE_MGROUP(DHCP6, "DHCPv6");
 static zebra_capabilities_t _caps_p[] = {
 	ZCAP_BIND,
 	ZCAP_NET_RAW,
+	ZCAP_NET_ADMIN,
 };
 
 struct zebra_privs_t accessd_privs = {
@@ -152,6 +154,8 @@ int main(int argc, char **argv, char **envp)
 	dhcp6r_zebra_init();
 	dhcp6r_if_init();
 	dhcp6_upstream_init();
+
+	arp_snoop_init();
 
 	frr_config_fork();
 	frr_run(master);
