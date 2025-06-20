@@ -17,7 +17,7 @@
 DEFINE_HOOK(attachd_if_addr_add, (struct connected *c), (c));
 DEFINE_KOOH(attachd_if_addr_del, (struct connected *c), (c));
 
-struct zclient *zclient = NULL;
+struct zclient *attachd_zclient = NULL;
 
 extern struct zebra_privs_t attachd_privs;
 
@@ -46,7 +46,7 @@ static int attachd_if_addr_del(ZAPI_CALLBACK_ARGS)
 static int if_addr_do(uint16_t cmd, struct interface *ifp,
 		      union prefixconstptr pu)
 {
-	struct stream *s = zclient->obuf;
+	struct stream *s = attachd_zclient->obuf;
 	
 	stream_reset(s);
 	zclient_create_header(s, cmd, ifp->vrf->vrf_id);
@@ -57,7 +57,7 @@ static int if_addr_do(uint16_t cmd, struct interface *ifp,
 	stream_put(s, &pu.p->u.prefix, prefix_blen(pu.p));
 
 	stream_putw_at(s, 0, stream_get_endp(s));
-	return zclient_send_message(zclient);
+	return zclient_send_message(attachd_zclient);
 }
 
 int if_addr_install(struct interface *ifp, union prefixconstptr pu)
@@ -85,8 +85,8 @@ void attachd_zebra_init(void)
 {
 	struct zclient_options opt = { };
 
-	zclient = zclient_new(master, &opt, attachd_handlers,
+	attachd_zclient = zclient_new(master, &opt, attachd_handlers,
 			      array_size(attachd_handlers));
-	zclient_init(zclient, ZEBRA_ROUTE_ATTACHD, 0, &attachd_privs);
-	zclient->zebra_connected = attachd_zebra_connected;
+	zclient_init(attachd_zclient, ZEBRA_ROUTE_ATTACHD, 0, &attachd_privs);
+	attachd_zclient->zebra_connected = attachd_zebra_connected;
 }

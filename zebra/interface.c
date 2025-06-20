@@ -4030,7 +4030,7 @@ void if_addr_zapi(struct zserv *client, struct interface *ifp, struct prefix *p,
 
 	frr_each (connected_reqs, ifc->zserv_reqs, zia) {
 		if (zia->t_holdover && zia->proto == proto) {
-			EVENT_OFF(zia->t_holdover);
+			event_cancel(&zia->t_holdover);
 			break;
 		}
 	}

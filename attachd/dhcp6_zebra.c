@@ -85,7 +85,7 @@ static void dhcp6r_zebra_ipv6_send(struct dhcp6_binding *bnd,
 */
 	zlog_info("sending cmd %d, %pFX, %pI6 to zebra", cmd, p,
 		  &api_nh->gate.ipv6);
-	zclient_route_send(cmd, zclient, &api);
+	zclient_route_send(cmd, attachd_zclient, &api);
 }
 
 void dhcp6r_zebra_ipv6_add(struct dhcp6_binding *bnd,
@@ -135,7 +135,7 @@ static void dhcp6r_zebra_ipv4_send(struct dhcp6r_iface *drif,
 */
 	zlog_info("sending cmd %d, %pFX, %pI6 to zebra", cmd, &api.prefix,
 		  &api_nh->gate.ipv6);
-	zclient_route_send(cmd, zclient, &api);
+	zclient_route_send(cmd, attachd_zclient, &api);
 }
 
 

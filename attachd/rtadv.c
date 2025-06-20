@@ -215,7 +215,7 @@ static void rtadv_vrf_decref(struct attachd_vrf *acvrf)
 	if (--ravrf->refcnt)
 		return;
 
-	EVENT_OFF(ravrf->t_read);
+	event_cancel(&ravrf->t_read);
 	close(ravrf->sock);
 
 	XFREE(MTYPE_RTADV_VRF, acvrf->rtadv_vrf);
@@ -755,7 +755,7 @@ static void rtadv_ifp_refresh(struct attachd_iface *acif)
 	struct rtadv_iface *rtadv = acif->rtadv;
 
 	if (rtadv->t_periodic && (!if_is_up(acif->ifp) || !rtadv->cfg.enable)) {
-		EVENT_OFF(rtadv->t_periodic);
+		event_cancel(&rtadv->t_periodic);
 		rtadv_vrf_decref(attachd_if_to_vrf(acif));
 		zlog_info("if %s disabled", acif->ifp->name);
 		return;
