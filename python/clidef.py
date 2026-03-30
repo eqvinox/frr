@@ -459,6 +459,7 @@ if __name__ == "__main__":
         const=True,
         help="print out list of arguments and types for each definition",
     )
+    argp.add_argument("--meson", type=str, metavar="PATH", help="meson mode")
     argp.add_argument("-o", type=str, metavar="OUTFILE", help="output C file name")
     argp.add_argument("cfile", type=str)
     args = argp.parse_args()
@@ -492,3 +493,17 @@ if __name__ == "__main__":
         clippy.wrdiff(
             args.o, ofd, [args.cfile, os.path.realpath(__file__), sys.executable]
         )
+    if args.meson:
+        with open(args.cfile, "r") as fd:
+            src = fd.read()
+
+        import re
+
+        regex = r'''^(#\s*include\s*")[a-z0-9]+/(''' + re.escape(args.cfile.split("/")[-1].removesuffix(".c")) + r'''_clippy\.c")'''
+        src = f"#line 1 \"{args.cfile}\"\n" + re.sub(regex, r'\1\2', src, flags=re.M)
+
+        clippy.wrdiff(
+            args.meson, src, [args.cfile, os.path.realpath(__file__), sys.executable]
+        )
+        #os.symlink(os.path.relpath(args.cfile, os.path.dirname(args.symlink)), args.symlink + '.tmp')
+        #os.rename(args.symlink + '.tmp', args.symlink)
