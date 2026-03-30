@@ -9,7 +9,9 @@
 
 #include <zebra.h>
 
+#include "lib/jhash.h"
 #include "lib/log.h"
+#include "lib/prefix.h" /* s6_addr32 */
 
 #ifdef __cplusplus
 extern "C" {
@@ -180,6 +182,24 @@ static inline int ipaddr_cmp(const struct ipaddr *a, const struct ipaddr *b)
 
 	assert(!"Reached end of function we should never hit");
 	return -1;
+}
+
+static inline uint32_t ipaddr_hash(const struct ipaddr *ip)
+{
+	uint32_t hashval = 0xb544f7c0;
+
+	switch (ip->ipa_type) {
+	case IPADDR_V4:
+		hashval = jhash_1word(ip->ipaddr_v4.s_addr, hashval);
+		break;
+	case IPADDR_V6:
+		hashval = jhash2(ip->ipaddr_v6.s6_addr32, array_size(ip->ipaddr_v6.s6_addr32),
+				 hashval);
+		break;
+	case IPADDR_NONE:
+		(void)0;
+	}
+	return hashval;
 }
 
 static inline bool ipaddr_is_zero(const struct ipaddr *ip)
