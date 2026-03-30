@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <netinet/in.h>
 
+#include "lib/compiler.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
