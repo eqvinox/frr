@@ -3907,7 +3907,6 @@ static void zevpn_clear_dup_detect_hash_vni_all(struct hash_bucket *bucket,
 	struct zebra_evpn *zevpn;
 	struct zebra_vrf *zvrf;
 	struct mac_walk_ctx m_wctx;
-	struct neigh_walk_ctx n_wctx;
 
 	zevpn = (struct zebra_evpn *)bucket->data;
 	if (!zevpn)
@@ -3918,11 +3917,8 @@ static void zevpn_clear_dup_detect_hash_vni_all(struct hash_bucket *bucket,
 	if (zebra_neigh_db_count(zevpn->neigh_table)) {
 		struct zebra_neigh *n;
 
-		memset(&n_wctx, 0, sizeof(n_wctx));
-		n_wctx.zevpn = zevpn;
-		n_wctx.zvrf = zvrf;
 		frr_each (zebra_neigh_db, zevpn->neigh_table, n)
-			zebra_evpn_clear_dup_neigh_hash(&n_wctx, n);
+			zebra_evpn_clear_dup_neigh_hash(zevpn, n);
 	}
 
 	if (num_valid_macs(zevpn)) {
@@ -3954,7 +3950,6 @@ int zebra_vxlan_clear_dup_detect_vni(struct zebra_vrf *zvrf, vni_t vni)
 {
 	struct zebra_evpn *zevpn;
 	struct mac_walk_ctx m_wctx;
-	struct neigh_walk_ctx n_wctx;
 
 	if (!is_evpn_enabled())
 		return 0;
@@ -3968,11 +3963,8 @@ int zebra_vxlan_clear_dup_detect_vni(struct zebra_vrf *zvrf, vni_t vni)
 	if (zebra_neigh_db_count(zevpn->neigh_table)) {
 		struct zebra_neigh *n;
 
-		memset(&n_wctx, 0, sizeof(n_wctx));
-		n_wctx.zevpn = zevpn;
-		n_wctx.zvrf = zvrf;
 		frr_each (zebra_neigh_db, zevpn->neigh_table, n)
-			zebra_evpn_clear_dup_neigh_hash(&n_wctx, n);
+			zebra_evpn_clear_dup_neigh_hash(zevpn, n);
 	}
 
 	if (num_valid_macs(zevpn)) {
@@ -5302,9 +5294,7 @@ int zebra_vxlan_svi_up(struct interface *ifp, struct interface *link_if)
 		if (is_l3vni_oper_up(zl3vni))
 			zebra_vxlan_process_l3vni_oper_up(zl3vni);
 	} else {
-
 		/* process SVI up for l2-vni */
-		struct neigh_walk_ctx n_wctx;
 		struct zebra_neigh *n;
 
 		zevpn = zebra_evpn_from_svi(ifp, link_if);
@@ -5336,11 +5326,8 @@ int zebra_vxlan_svi_up(struct interface *ifp, struct interface *link_if)
 			zebra_evpn_send_add_to_client(zevpn);
 
 		/* Install any remote neighbors for this VNI. */
-		memset(&n_wctx, 0, sizeof(n_wctx));
-		n_wctx.zevpn = zevpn;
-
 		frr_each (zebra_neigh_db, zevpn->neigh_table, n)
-			zebra_evpn_install_neigh_hash(&n_wctx, n);
+			zebra_evpn_install_neigh_hash(zevpn, n);
 
 		/* Link the SVI from the access VLAN */
 		zebra_evpn_acc_bd_svi_set(ifp->info, link_if->info, true);
