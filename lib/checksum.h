@@ -3,6 +3,7 @@
 #ifndef _FRR_CHECKSUM_H
 #define _FRR_CHECKSUM_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <netinet/in.h>
 
