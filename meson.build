@@ -1,4 +1,33 @@
-project('frr', 'c')
+project('frr', 'c',
+  version: '10.7.0-dev',
+  meson_version: '>= 1.10.0',
+)
+
+pkg_specs = configuration_data()
+
+pkg_specs.set('configure_input',    'version.h generated from lib/version.h.in by meson')
+pkg_specs.set('PACKAGE_NAME',       meson.project_name())
+pkg_specs.set('PACKAGE_VERSION',    meson.project_version())
+pkg_specs.set('PACKAGE_BUGREPORT',  'https://github.com/frrouting/frr/issues')
+pkg_specs.set('PACKAGE_URL',        'https://frrouting.org/')
+pkg_specs.set('PACKAGE_FULLNAME',   'FRRouting')
+pkg_specs.set('CONFIG_ARGS',        '<meson build>')
+
+prefix = get_option('prefix')
+frrlibdir = prefix / get_option('libdir') / get_option('frrlibdir')
+frrdaemondir = prefix / get_option('frrdaemondir')
+
+pkg_specs.set('e_frr_runstatedir',  prefix / get_option('rundir') / 'frr')
+pkg_specs.set('e_frr_libstatedir',  prefix / get_option('sharedstatedir') / 'frr')
+pkg_specs.set('e_yangmodelsdir',    prefix / get_option('datadir') / get_option('yangmodelsdir'))
+pkg_specs.set('e_moduledir',        frrlibdir / 'modules')
+pkg_specs.set('e_scriptdir',        prefix / get_option('sysconfdir') / 'frr' / get_option('scriptdir'))
+pkg_specs.set('e_frr_sysconfdir',   prefix / get_option('sysconfdir') / 'frr')
+pkg_specs.set('e_vtysh_bin',        prefix / get_option('bindir') / 'vtysh')
+pkg_specs.set('e_watchfrr_sh',      frrdaemondir / 'watchfrr.sh')
+
+configure_file(input: 'lib/version.h.in',      build_subdir: 'generated/lib', output: 'version.h',      configuration: pkg_specs)
+configure_file(input: 'lib/config_paths.h.in', build_subdir: 'generated/lib', output: 'config_paths.h', configuration: pkg_specs)
 
 add_project_arguments(
   '-std=gnu23',
@@ -95,7 +124,7 @@ yacc = find_program('bison', 'yacc', 'byacc')
 
 protoc_c = find_program('protoc-c')
 
-incls = include_directories('.', 'lib', 'lib/assert')
+incls = include_directories('.', 'lib', 'lib/assert', 'generated')
 #yacc_gen = custom_target('-d -Dapi.prefix=@BISON_OPENBRACE@cmd_yy@BISON_CLOSEBRACE@ @BISON_VERBOSE@
 #
 
