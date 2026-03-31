@@ -74,7 +74,7 @@ clippy_sources = [
 
 clippy_bin = executable('clippy',
   sources : clippy_sources, 
-  include_directories : include_directories('..', '.'),
+  include_directories : incls_noassert,
   native : true,
   dependencies : [py3.dependency(embed : true), libelf],
   c_args : '-DBUILDING_CLIPPY',

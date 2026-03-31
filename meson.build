@@ -124,7 +124,12 @@ yacc = find_program('bison', 'yacc', 'byacc')
 
 protoc_c = find_program('protoc-c')
 
-incls = include_directories('.', 'lib', 'lib/assert', 'generated')
+p_incls_noassert = ['.', 'lib', 'include', 'generated']
+p_incls = ['lib/assert'] + p_incls_noassert
+
+incls_noassert = include_directories(p_incls_noassert)
+incls = include_directories(p_incls)
+
 #yacc_gen = custom_target('-d -Dapi.prefix=@BISON_OPENBRACE@cmd_yy@BISON_CLOSEBRACE@ @BISON_VERBOSE@
 #
 

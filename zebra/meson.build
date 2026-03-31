@@ -87,7 +87,7 @@ zebra_sources = [
 zebra_bin = executable('zebra',
   sources : zebra_sources, 
   c_args : ['-DHAVE_CONFIG_H'],
-  include_directories : include_directories('..', '../lib', '../include'),
+  include_directories: incls,
   link_with: [
     libfrr,
   ],
