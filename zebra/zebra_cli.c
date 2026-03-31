@@ -10,7 +10,7 @@
 #include "vrf.h"
 
 #include "zebra/rtadv.h"
-#include "zebra_cli.h"
+#include "zebra/zebra_cli.h"
 #include "zebra/zebra_cli_clippy.c"
 
 #define EVPN_MH_VTY_STR "Multihoming\n"

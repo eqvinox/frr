@@ -139,6 +139,7 @@ libyang = dependency('libyang', version: '>= 2.1.128')
 libjson = cc.find_library('json-c')
 libm = cc.find_library('m')
 libcrypt = cc.find_library('crypt')
+libreadline = cc.find_library('readline')
 
 headers = configuration_data()
 
@@ -283,15 +284,14 @@ configure_file(
 )
 
 subdir('lib')
-
-#libfrr = sub_lib.get_variable('libfrr')
-#clippy = sub_lib.get_variable('clippy')
-
+subdir('mgmtd')
 subdir('zebra')
 
 frr_xref = custom_target('frr.xref',
   input : [libfrr_xref, zebra_xref],
-  output : ['frr.xref', 'vtysh_cmd.c'],
+  output : ['frr.xref', 'vtysh_cmd.c'] + vtysh_split,
   command : [clippy_bin, '../python/xrelfo.py', '-Werror', '-o', '@OUTPUT0@', '@INPUT@', '-c', '@OUTPUT1@', vtysh_split],
   build_by_default: true,
 )
+
+subdir('vtysh')
