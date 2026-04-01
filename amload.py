@@ -140,8 +140,28 @@ class ParserBase:
         return self.parser.parse(*args, tracking=True, **kwargs)
 
 
-AMParser = ParserBase(tokens=AMLexer.tokens)
+class CondStack(list[T.Tuple["AMConditional", bool]]):
+    def short(self):
+        def item(cond, arc):
+            return ("" if arc else "!") + cond.cond
+        return " && ".join(item(cond, arc) for cond, arc in self)
 
+    def __add__(self, other):
+        return CondStack(list(self) + other)
+
+    def __sub__(self, other):
+        new = CondStack()
+        for cond, arc in self:
+            if (cond, not arc) in other:
+                raise ValueError("impossible!")
+            if (cond, arc) in other:
+                continue
+            new.append((cond, arc))
+        return new
+
+AMParser = ParserBase(tokens=AMLexer.tokens)
+#CondStack: T.TypeAlias = list[T.Tuple["AMConditional", bool]]
+Walker: T.TypeAlias = T.Callable[["AMAssign | AMTarget", CondStack], None]
 
 class AMExpr:
     _args: list[str]
@@ -186,6 +206,8 @@ class AMExpr:
     def recurse(self, parser):
         pass
 
+    def _walk(self, cb: Walker, condstack: CondStack) -> None:
+        raise NotImplemented("override this")
 
 I = T.TypeVar("I", bound=AMExpr)
 
@@ -194,7 +216,7 @@ class AMExprsBase(AMExpr, list[I]):
     _list: list[I] | None
     _item: I | None
 
-    def __init__(self, *args, **kwargs):  # items = [], append = None, **kwa):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self._list:
             self.extend(self._list)
@@ -231,6 +253,11 @@ class AMAssign(AMExpr):
         """expr : NAME EQ VALUE"""
         p[0] = AMAssign(p, [2, 1, 3])
 
+    def _walk(self, cb: Walker, condstack: CondStack) -> None:
+        cb(self, condstack)
+
+    def str_inc(self):
+        return f"{self.mode} {self.value!r}"
 
 class AMConditional(AMExpr):
     cond: str
@@ -243,6 +270,10 @@ class AMConditional(AMExpr):
         | IF VALUE exprs ELSE exprs ENDIF"""
         p[0] = AMConditional(p, [2, 3, 5])
 
+    def _walk(self, cb: Walker, condstack: CondStack) -> None:
+        self.it_true._walk(cb, condstack + [(self, True)])
+        if self.it_false is not None:
+            self.it_false._walk(cb, condstack + [(self, False)])
 
 class AMExprs(AMExprsBase[AMExpr]):
     @AMParser.rule
@@ -254,6 +285,10 @@ class AMExprs(AMExprsBase[AMExpr]):
     def p_exprs_one(p: YaccProduction):
         """exprs : exprs expr"""
         p[0] = AMExprs(p, [1, 2])
+
+    def _walk(self, cb: Walker, condstack: CondStack) -> None:
+        for item in self:
+            item._walk(cb, condstack)
 
 
 class AMBuildCmd(AMExpr):
@@ -287,6 +322,9 @@ class AMTarget(AMExpr):
         """expr : TARGET VALUE builds"""
         p[0] = AMTarget(p, [1, 2, 3])
 
+    def _walk(self, cb: Walker, condstack: CondStack) -> None:
+        cb(self, condstack)
+
 
 class AMInclude(AMExpr, list):
     filename: str
@@ -313,6 +351,10 @@ class AMInclude(AMExpr, list):
         for item in self:
             item.recurse(parser)
 
+    def _walk(self, cb: Walker, condstack: CondStack) -> None:
+        for item in self:
+            item._walk(cb, condstack)
+
 
 class AMFile(AMInclude):
     lexer = AMLexer().build()
@@ -325,25 +367,263 @@ class AMFile(AMInclude):
     def load(self):
         self.recurse(self.parser)
 
+    def walk(self, cb: Walker) -> None:
+        super()._walk(cb, CondStack())
 
-prefixes = ["noinst", "nodist", "dist", "inst", "check", "EXTRA"]
+
+code_flags = [
+    "SOURCES",
+    "CFLAGS",
+    "CPPFLAGS",
+    "LIBADD",
+    "LDADD",
+    "LDFLAGS",
+    "LFLAGS",
+    "YFLAGS",
+]
+mainkeys = {
+    "PROGRAMS": code_flags,
+    "SCRIPTS": [],
+    "HEADERS": [],
+    "LIBRARIES": code_flags,
+    "LTLIBRARIES": code_flags,
+    "MANS": [],
+    "DATA": [],
+}
+
+prefixes = ["noinst", "nodist", "nobase", "dist", "inst", "check", "EXTRA"]
 re_canon = re.compile("[^a-zA-Z0-9]")
 re_fixrefs = re.compile(r"""\$\(([^\)]+)\)""")
-flagnames = ["CFLAGS", "CPPFLAGS", "LIBADD", "LDADD", "LDFLAGS", "LFLAGS", "YFLAGS"]
 
 
 def fixrefs(d):
     return re_fixrefs.sub("$\\1", d)
 
+class Formatter(list):
+    def __init__(self):
+        self.lens = []
+
+    def __call__(self, *args):
+        if len(self.lens) < len(args[:-1]):
+            self.lens.extend([0] * (len(args) - len(self.lens)))
+        for i, arg in enumerate(args[:-1]):
+            self.lens[i] = max(self.lens[i], len(arg))
+        self.append(args)
+
+    def out(self, stream=sys.stdout, prefix=""):
+        for row in self:
+            stream.write(prefix)
+            for i, width, val in zip(range(0, len(self.lens)), self.lens, row):
+                if i != 0:
+                    stream.write(" ")
+                if i == len(self.lens) - 1:
+                    stream.write(val)
+                else:
+                    stream.write(val.ljust(width))
+            stream.write("\n")
+
+KT = T.TypeVar("KT")
+VT = T.TypeVar("VT")
+
+class DictUsageProxy: #(T.Mapping[KT, VT]):
+    _target: T.Mapping[KT, VT]
+    used: set[KT]
+
+    def __init__(self, target: T.Mapping[KT, VT]):
+        self._target = target
+        self.used = set()
+
+    def __contains__(self, key: KT) -> bool:
+        return key in self._target
+
+    def __getitem__(self, key: KT) -> VT:
+        self.used.add(key)
+        return self._target[key]
+
+class Collector:
+    phonies: set[str]
+
+    mvars: dict[str, list[tuple[AMAssign, CondStack]]]
+    am_items: dict[str, list[tuple[str, str, str]]]
+
+    def __init__(self):
+        self.targets = {}
+        self.mvars = {}
+        self.am_items = {}
+        self.mainkeys = set()
+        self.phonies = set()
+
+    def _walk_assign(self, item: AMAssign, condstack: CondStack) -> None:
+        name = item.var.strip()
+        if name.startswith("AM_V_") or name.startswith("am__v_"):
+            return
+
+        self.mvars.setdefault(name, []).append((item, condstack))
+
+        suffix = name.rsplit("_", 1)[-1]
+        if suffix in mainkeys:
+            self.mainkeys.add(name)
+
+        #print("===")
+        #for cond, arc in condstack:
+        #    print(f"\t{cond.cond}={arc}")
+        #print(item.pretty())
+
+    _ignore_targets = frozenset([
+        ".PRECIOUS",
+        ".SILENT",
+        ".DEFAULT_GOAL",
+
+        "all-am",
+        "yorn",
+        "indent",
+        "redistclean",
+        "topotests",
+        "topotests-build",
+        "copy_script",
+        "check",
+        "test",
+        "doc",
+        "clippy-only",
+    ])
+    _ignore_targets_re = [re.compile(expr) for expr in [
+        r"(^|-)coverage$",
+        r"^clean-",
+        r"^install-",
+        r"-(info|html|pdf)$",
+        r"^(info|html|pdf)-",
+    ]]
+
+    def _walk_target(self, item: AMTarget, condstack: CondStack) -> None:
+        target = item.target.strip()
+
+        if target in self._ignore_targets:
+            #print(f"ignored target {item.target}")
+            return
+        for ignore_re in self._ignore_targets_re:
+            if ignore_re.search(target):
+                #print(f"ignored target {item.target} (rex {ignore_re})")
+                return
+
+        if target == ".PHONY":
+            deps = item.deps.strip().split()
+            self.phonies.update(deps)
+            for phony in deps:
+                if phony in self.targets:
+                    del self.targets[phony]
+                    #print(f"removed .PHONY target {phony}")
+            return
+
+        if target in self.phonies:
+            #print(f"ignored .PHONY target {item.target}")
+            return
+
+        self.targets.setdefault(target, []).append((item, condstack))
+        #print("===")
+        #for cond, arc in condstack:
+        #    print(f"\t{cond.cond}={arc}")
+        #print(item.pretty())
+        #print(f"target: {item.target!r}")
+
+    def walk(self, item: AMAssign | AMTarget, condstack: CondStack) -> None:
+        if isinstance(item, AMTarget):
+            self._walk_target(item, condstack)
+        else:
+            self._walk_assign(item, condstack)
+
+    def am_targets(self):
+        mvars = DictUsageProxy(self.mvars)
+        dirvars = set()
+
+        for mainkey in sorted(self.mainkeys):
+            category, mode = mainkey.rsplit("_", 1)
+            modeitems = self.am_items.setdefault(mode, [])
+
+            dirvar = category
+            while (s := dirvar.split("_", 1))[0] in prefixes:
+                if len(s) == 1:
+                    dirvar = None
+                    break
+                dirvar = s[1]
+            else:
+                dirvars.add(dirvar)
+
+            #print(f"=== {mainkey} / {dirvar}dir ===")
+
+            assert mvars[mainkey][0][0].mode == "="
+            #condsets = {}
+
+            for assign, conds in mvars[mainkey]:
+                #condkey = conds.short()
+                #itemlist = condsets.setdefault(condkey, [])
+                vals = assign.value.strip().split()
+                #itemlist.extend(vals)
+
+                for val in vals:
+                    modeitems.append((category, conds, val, dirvar))
+                #print(f"\t{i.str_inc():30} {conds.short()}")
+            #for cond, items in condsets.items():
+            #    print(f"\t{cond+':':10} {', '.join(items)}")
+        print("=====")
+        for dirvar in sorted(dirvars):
+            if dirvar + "dir" in mvars:
+                dirval = mvars[dirvar + 'dir']
+                assert len(dirval) == 1
+                val, conds = dirval[0]
+
+                print(f"\t{dirvar:20} = {val.value!r} [{conds.short()}]")
+            else:
+                print(f"\t{dirvar:20} =   <undefined>")
+        print("=====")
+        def show(vals, rmconds=CondStack()):
+            ret = []
+            for assign, vconds in vals:
+                value = " ".join(assign.value.strip().split())
+                realconds = vconds - rmconds
+                if realconds:
+                    ret.append(f"\033[33m[{realconds.short()}]?(\033[m {value} \033[33m)\033[m")
+                else:
+                    ret.append(value)
+            return ", ".join(ret)
+
+        for mode, items in self.am_items.items():
+            print(f"=== {mode} ===")
+            fmt = Formatter()
+            for category, conds, val, dirvar in sorted(items, key=lambda i: i[2]):
+                fmt(f"[{dirvar or '.'}]", conds.short(), val)
+                canon = re_canon.sub("_", val)
+
+                for flag in mainkeys[mode]:
+                    for prefix in ["", "nodist_"]:
+                        flagvar = prefix + canon + "_" + flag
+                        if flagvar in mvars:
+                            fmt(f"\t\t>> {flagvar+' =':25} {show(mvars[flagvar], conds)}")
+
+            fmt.out(prefix="\t")
+
+        print("unused:")
+        for k, v in self.mvars.items():
+            if k in mvars.used:
+                continue
+            print(f"\t{k} = {show(v)}")
+        #print("\n".join(c.mvars.keys()))
 
 if __name__ == "__main__":
     for fn in sys.argv[1:]:
         sys.stderr.write("\033[33m%s\033[m\n" % fn)
         file = AMFile(fn)
         file.load()
-        p = file.pretty()
-        print(p)
-        print(f"# lines: {p.count('\n')}")
+        if False:
+            p = file.pretty()
+            print(p)
+            print(f"# lines: {p.count('\n')}")
+
+        c = Collector()
+        file.walk(c.walk)
+        c.am_targets()
+
+        #print("\n".join(c.mvars.keys()))
+
         # with open(fn, encoding="UTF-8") as fd:
         #    data = fd.read()
 
