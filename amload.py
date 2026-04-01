@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# pylint: disable=no-self-argument,unsupported-assignment-operation
 
 from __future__ import annotations
 
