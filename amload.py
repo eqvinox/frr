@@ -118,12 +118,17 @@ class AMLexer(LexerBase):
 class AMExpr:
     _args = []
 
-    def __init__(self, *a, super_a=[], super_kwa={}, p=None, **kwa):
-        super().__init__(*super_a, **super_kwa)
-        for k, v in list(zip(self._args[:len(a)], a)) + list(kwa.items()):
-            setattr(self, k, v)
-        for k in self._args[len(a):]:
-            setattr(self, k, None)
+    def __init__(self, p, argidx, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        for arg, idx in zip(self._args, argidx + [None] * len(self._args)):
+            val = None
+            if idx is not None and idx < len(p):
+                val = p[idx]
+            setattr(self, arg, val)
+
+        self.lineno = p.lineno(0)
+        self.lexspan = p.lexspan(0)
         #if p:
         #self.lineno = kwa.get('lineno', None)
 
@@ -143,7 +148,6 @@ class AMExpr:
 
 class AMAssign(AMExpr):
     _args = ['mode', 'var', 'value']
-    sre = re.compile('@([a-zA-Z0-9_]+)@')
 
 class AMConditional(AMExpr):
     _args = ['cond', 'it_true', 'it_false']
@@ -152,13 +156,18 @@ class AMTarget(AMExpr):
     _args = ['target', 'deps', 'builds']
 
 class AMExprs(AMExpr, list):
-    def __init__(self, items = [], **kwa):
-        super().__init__(super_a=[items], **kwa)
+    _args = ['_list', '_item']
+
+    def __init__(self, *args, **kwargs): #items = [], append = None, **kwa):
+        super().__init__(*args, **kwargs)
+        if self._list:
+            self.extend(self._list)
+        if self._item is not None:
+            self.append(self._item)
 
     def pretty(self):
         name = " name='%s'" % (self.name) if hasattr(self, 'name') else ''
         if hasattr(self, "lineno"):
-            breakpoint()
             lineno = " #%d" % (self.lineno) if self.lineno else ""
         else:
             lineno = ""
@@ -183,8 +192,7 @@ class AMInclude(AMExpr, list):
                 ''.join(['  %s\n' % i.pretty() for i in self]))
 
     def recurse(self, parser):
-        if self.filename is None:
-            breakpoint()
+        #if self.filename is None:
         with open(self.filename, encoding="UTF-8") as fd:
             data = fd.read()
         self.extend(parser(data))
@@ -207,31 +215,31 @@ class AMParser(object):
 
     def p_exprs_empty(self, p):
         '''exprs : '''
-        p[0] = AMExprs(p=p)
+        p[0] = AMExprs(p, [])
     def p_exprs_one(self, p):
         '''exprs : exprs expr'''
-        p[0] = AMExprs(p[1] + [p[2]], p=p)
+        p[0] = AMExprs(p, [1, 2])
 
     def p_expr_cond(self, p):
         '''expr : IF VALUE exprs ENDIF
                 | IF VALUE exprs ELSE exprs ENDIF'''
-        p[0] = AMConditional(p[2], p[3], None if len(p) <= 5 else p[5])
+        p[0] = AMConditional(p, [2, 3, 5])
     def p_expr_incl(self, p):
         '''expr : INCLUDE VALUE'''
-        p[0] = AMInclude(p[2])
+        p[0] = AMInclude(p, [2])
     def p_expr_assign(self, p):
         '''expr : NAME EQ VALUE'''
-        p[0] = AMAssign(p[2], p[1], p[3])
+        p[0] = AMAssign(p, [2, 1, 3])
     def p_expr_target(self, p):
         '''expr : TARGET VALUE builds'''
-        p[0] = AMTarget(p[1], p[2], p[3])
+        p[0] = AMTarget(p, [1, 2, 3])
 
     def p_builds_empty(self, p):
         '''builds : '''
-        p[0] = AMBuild()
+        p[0] = AMBuild(p, [])
     def p_builds_build(self, p):
         '''builds : builds BUILD'''
-        p[0] = AMBuild(p[1] + [p[2]])
+        p[0] = AMBuild(p, [1, 2])
 
     def build(self, **kwargs):
         self.parser = yacc.yacc(module = self, start = 'exprs', **kwargs)
@@ -265,6 +273,7 @@ if __name__ == "__main__":
         sys.stderr.write('\033[33m%s\033[m\n' % fn)
         file = AMFile(fn)
         file.load()
+        file.recurse(file.parser)
         print(file.pretty())
         #with open(fn, encoding="UTF-8") as fd:
         #    data = fd.read()
