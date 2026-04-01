@@ -542,13 +542,13 @@ def _flatten_var(mvars, values, parentconds=None, recurse=False):
                 return
             #print("recursing into variable")
             if element[0].value in never_expand:
-                print(f"\033[36mnever_expand {element[0].value!r}\033[m")
+                #print(f"\033[36mnever_expand {element[0].value!r}\033[m")
                 return
             try:
                 values.extend((assign, varconds + conds) for assign, varconds in mvars[element[0].value])
-                print(f"\033[32mexpand {element[0].value!r}\033[m")
+                #print(f"\033[32mexpand {element[0].value!r}\033[m")
             except KeyError:
-                print(f"\033[33mreference to undefined {element[0].value!r}\033[m")
+                #print(f"\033[33mreference to undefined {element[0].value!r}\033[m")
                 yield ("${" + element[0].value + "}", conds)
         elif len(element) == 1 and element[0].type == "ACVAR":
             yield ("${" + element[0].value + "}", conds)
@@ -630,7 +630,7 @@ class ATCompiledBase(ATarget):
         stream = streams[basepath]
 
         name = re_canon.sub("_", os.path.basename(self.name))
-        emit_source_list(c, stream, name, self.sources, basepath, f"\n  # {self.name}")
+        emit_source_list(c, stream, name.removesuffix("_la").removesuffix("_a"), self.sources, basepath, f"\n  # {self.name}")
 
 def display_source(c, basepath, src):
     relsrc = os.path.relpath(src, basepath)
@@ -662,25 +662,32 @@ deps = {
     "${LIBYANG_LIBS}": "libyang",
     "${UST_LIBS}": None, #"tracing",
     "${LIBM}": "libm",
+    "${UNWIND_LIBS}": "libunwind",
+    "${LUA_LIBS}": None,
+    "${LUA_LIB}": None,
+    "${LIBCRYPT}": "libcrypt",
+    "${LIBDL}": "libdl",
+    "${SNMP_LIBS}": "snmp",
+    "${CARES_LIBS}": "libcares",
+    "${ZEROMQ_LIBS}": None,
+    "${PROTOBUF_C_LIBS}": None,
+    "${SYSREPO_LIBS}": None,
+    "${GRPC_LIBS}": None,
+    "${DPDK_LIBS}": None,
+    "${RTRLIB_LIBS}": "rtrlib",
     "-lm": "libm",
     "-lpthread": None,
     "-lcunit": "cunit",
 }
 
-class ATProgram(ATCompiledBase):
-    def emit(self, c, streams, meep="executable", opn=None):
-        if self.name == "tools/frr-llvm-cg" or self.name.startswith("tests/") or self.name == "lib/clippy":
-            return
+class ATCommon(ATCompiledBase):
+    def emit(self, c, streams, func, varname):
         super().emit(c, streams)
 
         basepath = os.path.dirname(self.name)
-        name = re_canon.sub("_", os.path.basename(self.name))
+        name = re_canon.sub("_", os.path.basename(self.name)).removeprefix("lib").removesuffix("_la")
         stream = streams[basepath]
 
-        opn = opn or name + "_bin"
-        stream.write(f"""{opn} = {meep}('{name}',
-  sources: {name}_sources,
-""")
         args = {
             "c_args": ["'-DHAVE_CONFIG_H'"],
             "include_directories": ["incls"],
@@ -689,8 +696,11 @@ class ATProgram(ATCompiledBase):
         for flag, vals in self.flags.items():
             if not vals:
                 continue
-            if flag == "LDADD":
-                for val, cond in vals:
+            if flag in ["LDADD", "LIBADD"]:
+                vals = vals[:]
+                while vals:
+                    val, cond = vals.pop(0)
+
                     if cond:
                         stream.write(f"    # FIXME: {val} {cond.short()}\n")
                         continue
@@ -717,15 +727,69 @@ class ATProgram(ATCompiledBase):
                         # nothing
                     else:
                         breakpoint()
-            elif flag in ["CPPFLAGS", "CFLAGS"]:
-                for val, cond in vals:
+            elif flag in ["CPPFLAGS", "CFLAGS", "CXXFLAGS"]:
+                dst = "cxx" if flag == "CXXFLAGS" else "c"
+                origvals = vals
+                vals = vals[:]
+                while vals:
+                    val, cond = vals.pop(0)
+
                     assert not cond
-                    if val == "${SAN_FLAGS}":
+                    if val in [
+                            "${SAN_FLAGS}", "${SNMP_CFLAGS}", "${CARES_CFLAGS}", "${ZEROMQ_CFLAGS}", "${PROTOBUF_C_CFLAGS}",
+                            "${GRPC_CXXFLAGS}", "${SYSREPO_CFLAGS}", "${WERROR}", "${GRPC_CFLAGS}", "${DPDK_CFLAGS}",
+                            "${RTRLIB_CFLAGS}",
+                        ]:
                         continue
-                    elif isinstance(val, str) and val.startswith("-D"):
-                        args.setdefault("c_args", []).append("'" + val + "'")
-                    elif isinstance(val, list) and val[0].value == "-I":
+                    elif val in ["-fPIC"]:
+                        args["pic"] = 'true',
+                    elif isinstance(val, str) and (val.startswith("-D") or val.startswith("-std")):
+                        args.setdefault(dst + "_args", []).append("'" + val + "'")
+                    elif isinstance(val, str) and val.startswith("-I"):
                         stream.write(f"    # FIXME: {val}\n")
+                        if len(val) == 2:
+                            val1, cond1 = vals.pop(0)
+                    elif isinstance(val, list) and val[0].value.startswith("-I"):
+                        stream.write(f"    # FIXME: {val}\n")
+                        #if len(val[0].value) == 2:
+                        #    val1, cond1 = vals.pop(0)
+                    else:
+                        breakpoint()
+
+            elif flag in ["LDFLAGS"]:
+                vals = vals[:]
+                while vals:
+                    val, cond = vals.pop(0)
+
+                    assert not cond
+                    if val == "-version-info":
+                        val1, cond1 = vals.pop(0)
+                        assert cond1 == cond
+                        args["version"] = "'" + val1.replace(":", ".") + "'"
+                    elif val == "-avoid-version":
+                        if func != "shared_module":
+                            args["soversion"] = "''"
+                    elif val == "-L/usr/local/lib":
+                        pass
+                    elif val == "-v":
+                        pass
+                    elif val == "-shared":
+                        pass
+                    elif val == "-module":
+                        func = "shared_module"
+                        if "soversion" in args:
+                            del args["soversion"]
+                    elif val == "-Xlinker":
+                        val1, cond1 = vals.pop(0)
+                        assert cond1 == cond
+
+                        link_args = args.setdefault("link_args", [])
+                        link_args.append("'-Xlinker'")
+                        link_args.append(f"'{val1}'")
+                    elif val in ["${AC_LDFLAGS}", "${SAN_FLAGS}"]:
+                        pass
+                    elif val == "-export-dynamic":
+                        pass
                     else:
                         breakpoint()
             #elif flag == "CFLAGS":
@@ -738,25 +802,56 @@ class ATProgram(ATCompiledBase):
             else:
                 breakpoint()
 
+        stream.write(f"""{varname} = {func}('{name}',
+  sources: {varname.removesuffix('_bin')}_sources,
+""")
+
         for argt, vals in args.items():
-            stream.write(f"  {argt}: [\n")
-            for arg in vals:
-                stream.write(f"    {arg},\n")
-            stream.write("  ],\n")
+            stream.write(f"  {argt}: ")
+            if isinstance(vals, list):
+                stream.write("[\n")
+                for arg in vals:
+                    stream.write(f"    {arg},\n")
+                stream.write("  ],\n")
+            else:
+                stream.write(str(vals) + "\n")
 
         stream.write(")\n\n")
+        return stream
 
-class ATLibrary(ATProgram): #CompiledBase):
+class ATProgram(ATCommon):
+    def emit(self, c, streams):
+        if self.name == "tools/frr-llvm-cg" or self.name.startswith("tests/") or self.name == "lib/clippy":
+            return
+
+        basepath = os.path.dirname(self.name)
+        name = re_canon.sub("_", os.path.basename(self.name))
+
+        varname = name + "_bin"
+        stream = super().emit(c, streams, "executable", varname)
+        stream.write(f"""{varname}_wrap = custom_target('{varname}_wrap',
+  output: ['{name}.dep'],
+  input: [{varname}],
+  command: ['ln', '-sf', '@PLAINNAME@', '@OUTPUT@'],
+)
+{name}_xref = xrelfo.process({varname}_wrap)
+""")
+
+class ATLibrary(ATCommon): #CompiledBase):
     def emit(self, c, streams):
         basepath = os.path.dirname(self.name)
         name = re_canon.sub("_", os.path.basename(self.name))
 
-        stream = streams[basepath]
-        stream.write(f"""#{name}_a = library() >>\n""")
-        super().emit(c, streams, "static_library", opn=os.path.basename(self.name).split(".")[0])
+        varname = os.path.basename(self.name).split(".")[0]
+        super().emit(c, streams, "static_library", varname)
 
-class ATLibtoolLibrary(ATCompiledBase):
-    pass
+class ATLibtoolLibrary(ATCommon):
+    def emit(self, c, streams):
+        basepath = os.path.dirname(self.name)
+        name = re_canon.sub("_", os.path.basename(self.name)).removeprefix("lib")
+
+        varname = os.path.basename(self.name).split(".")[0]
+        super().emit(c, streams, "shared_library", varname)
 
 mainkeys = {
     "PROGRAMS": ATProgram,
@@ -952,7 +1047,7 @@ class Collector:
         for mode, targets in self.am_items.items():
             for target in targets:
                 target.process(mvars)
-                target.dump()
+                #target.dump()
 
         self.source_lists = mvars.source_lists
 
@@ -1009,6 +1104,7 @@ if __name__ == "__main__":
         streams: dict[str, io.StringIO] = defaultdict()
         streams.default_factory = io.StringIO
 
+        streams["lib"] = sys.stdout
         for slist in c.source_lists:
             srcs = list(_flatten_var(c.mvars, c.mvars[slist]))
             path = os.path.dirname(srcs[0][0])
@@ -1019,7 +1115,7 @@ if __name__ == "__main__":
             for target in targets:
                 target.emit(c, streams)
 
-        for i in ["bfdd", "pimd"]:
+        for i in ["bfdd", "pimd", "ripd", "ripngd", "staticd", "watchfrr", "bgpd"]:
             with open(f"{i}/meson.build", "w") as fd:
                 fd.write(streams[i].getvalue())
 
