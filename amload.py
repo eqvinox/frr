@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from __future__ import annotations
+
 import sys
 import os
 import subprocess
 import re
+import typing as T
 
 import ply.lex as lex
 import ply.yacc as yacc
+
+if T.TYPE_CHECKING:
+    from ply.yacc import YaccProduction
 
 class LexerBase:
     def new_line(self, lexer, n = 1):
@@ -25,7 +31,6 @@ class LexerBase:
         raise ValueError("<input>:%d:%d: Illegal character '%s'\n> %s\n> %s^- here" % (
                 t.lexer.lineno, relpos + 1, t.value[0], line, indstr(line, relpos)))
 
-    # general foo
     def build(self, **kwargs):
         self.lexer = lex.lex(module = self, **kwargs)
         return self
@@ -115,9 +120,13 @@ class AMLexer(LexerBase):
         t.lexer.pop_state()
         return t
 
+class ParserBase:
+    def __init__(self, tokens):
+        self.tokens = tokens
 
-class AMParser:
-    tokens = AMLexer.tokens
+    def rule(self, func):
+        setattr(self, func.__name__, func)
+        return staticmethod(func)
 
     def build(self, **kwargs):
         self.parser = yacc.yacc(module = self, start = 'exprs', **kwargs)
@@ -126,16 +135,11 @@ class AMParser:
     def __call__(self, *args, **kwargs):
         return self.parser.parse(*args, tracking=True, **kwargs)
 
+AMParser = ParserBase(tokens=AMLexer.tokens)
 
 class AMExpr:
     _args = []
     rules = []
-
-    def __init_subclass__(cls, *args, **kwargs):
-        super().__init_subclass__(*args, **kwargs)
-        for name, val in cls.__dict__.items():
-            if name.startswith("p_"):
-                setattr(AMParser, name, val)
 
     def __init__(self, p, argidx, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -168,14 +172,16 @@ class AMExpr:
 class AMAssign(AMExpr):
     _args = ['mode', 'var', 'value']
 
-    def p_expr_assign(self, p):
+    @AMParser.rule
+    def p_expr_assign(p):
         '''expr : NAME EQ VALUE'''
         p[0] = AMAssign(p, [2, 1, 3])
 
 class AMConditional(AMExpr):
     _args = ['cond', 'it_true', 'it_false']
 
-    def p_expr_cond(self, p):
+    @AMParser.rule
+    def p_expr_cond(p):
         '''expr : IF VALUE exprs ENDIF
                 | IF VALUE exprs ELSE exprs ENDIF'''
         p[0] = AMConditional(p, [2, 3, 5])
@@ -183,18 +189,21 @@ class AMConditional(AMExpr):
 class AMTarget(AMExpr):
     _args = ['target', 'deps', 'builds']
 
-    def p_expr_target(self, p):
+    @AMParser.rule
+    def p_expr_target(p):
         '''expr : TARGET VALUE builds'''
         p[0] = AMTarget(p, [1, 2, 3])
 
 class AMExprs(AMExpr, list):
     _args = ['_list', '_item']
 
-    def p_exprs_empty(self, p):
+    @AMParser.rule
+    def p_exprs_empty(p):
         '''exprs : '''
         p[0] = AMExprs(p, [])
 
-    def p_exprs_one(self, p):
+    @AMParser.rule
+    def p_exprs_one(p):
         '''exprs : exprs expr'''
         p[0] = AMExprs(p, [1, 2])
 
@@ -220,18 +229,21 @@ class AMExprs(AMExpr, list):
             item.recurse(parser)
 
 class AMBuild(AMExprs, list):
-    def p_builds_empty(self, p):
+    @AMParser.rule
+    def p_builds_empty(p):
         '''builds : '''
         p[0] = AMBuild(p, [])
 
-    def p_builds_build(self, p):
+    @AMParser.rule
+    def p_builds_build(p):
         '''builds : builds BUILD'''
         p[0] = AMBuild(p, [1, 2])
 
 class AMInclude(AMExpr, list):
     _args = ['filename']
 
-    def p_expr_incl(self, p):
+    @AMParser.rule
+    def p_expr_incl(p):
         '''expr : INCLUDE VALUE'''
         p[0] = AMInclude(p, [2])
 
@@ -248,20 +260,10 @@ class AMInclude(AMExpr, list):
         for item in self:
             item.recurse(parser)
 
-#    def __init__(self, items = []):
-#        super().__init__()
-#        self.extend(items)
-#
-#    def pretty(self):
-#        name = " name='%s' " % (self.name) if hasattr(self, 'name') else ''
-#        return '<%s (%d)%s%s>' % (self.__class__.__name__, len(self),
-#                '\n' if len(self) > 0 else '',
-#                ''.join(['  %s\n' % i for i in self]))
-
 
 class AMFile(AMInclude):
     lexer = AMLexer().build()
-    parser = AMParser().build()
+    parser = AMParser.build()
 
     def __init__(self, filename):
         super().__init__(None, [])
