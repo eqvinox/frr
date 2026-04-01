@@ -115,6 +115,7 @@ class AMLexer(LexerBase):
         t.lexer.pop_state()
         return t
 
+
 class AMParser:
     tokens = AMLexer.tokens
 
@@ -138,6 +139,8 @@ class AMExpr:
 
     def __init__(self, p, argidx, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        if p is None:
+            return
 
         for arg, idx in zip(self._args, argidx + [None] * len(self._args)):
             val = None
@@ -147,8 +150,6 @@ class AMExpr:
 
         self.lineno = p.lineno(0)
         self.lexspan = p.lexspan(0)
-        #if p:
-        #self.lineno = kwa.get('lineno', None)
 
     @staticmethod
     def pretty_maybe(val):
@@ -241,7 +242,6 @@ class AMInclude(AMExpr, list):
                 ''.join(['  %s\n' % i.pretty() for i in self]))
 
     def recurse(self, parser):
-        #if self.filename is None:
         with open(self.filename, encoding="UTF-8") as fd:
             data = fd.read()
         self.extend(parser(data))
@@ -259,18 +259,17 @@ class AMInclude(AMExpr, list):
 #                ''.join(['  %s\n' % i for i in self]))
 
 
-class AMFile(AMExprs):
+class AMFile(AMInclude):
     lexer = AMLexer().build()
     parser = AMParser().build()
 
     def __init__(self, filename):
+        super().__init__(None, [])
         self.filename = filename
-        #self.lineno = None
 
     def load(self):
-        with open(self.filename, encoding="UTF-8") as fd:
-            text = fd.read()
-        self.extend(self.parser(text))
+        self.recurse(self.parser)
+
 
 prefixes = ['noinst', 'nodist', 'dist', 'inst', 'check', 'EXTRA']
 re_canon = re.compile('[^a-zA-Z0-9]')
@@ -284,7 +283,6 @@ if __name__ == "__main__":
         sys.stderr.write('\033[33m%s\033[m\n' % fn)
         file = AMFile(fn)
         file.load()
-        file.recurse(file.parser)
         p = file.pretty()
         print(p)
         print(f"# lines: {p.count('\n')}")
