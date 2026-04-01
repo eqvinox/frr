@@ -1477,8 +1477,8 @@ static const char interp[]
  * that can be called is rather limited
  */
 extern void _libfrr_version(void)
-	__attribute__((visibility("hidden"), noreturn));
-void _libfrr_version(void)
+	__attribute__((visibility("hidden"), force_align_arg_pointer, noreturn));
+void _libfrr_version0(void)
 {
 	const char banner[] =
 		FRR_FULL_NAME " " FRR_VERSION ".\n"
@@ -1488,8 +1488,26 @@ void _libfrr_version(void)
 #endif
 	;
 	write(1, banner, sizeof(banner) - 1);
+}
+extern void __libc_start_main(void (*main)(void), int argc, char **argv,
+			      void *dummy_init, void *dummy_fini, void *rtld_fini,
+			      void *stack_end);
+void _libfrr_version(void)
+{
+	char *args[1] = { NULL };
+	__libc_start_main(_libfrr_version0, 0, args, NULL, NULL, NULL, NULL);
 	_exit(0);
 }
+
+__attribute__((visibility("hidden")))
+int libfrr_main(int argc, char **argv);
+
+int libfrr_main(int argc, char **argv)
+{
+	_libfrr_version0();
+	return 0;
+}
+
 
 /* Render simple version tuple to string */
 const char *frr_vers2str(uint32_t version, char *buf, int buflen)
