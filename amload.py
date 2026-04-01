@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys
+import os
+import subprocess
+import re
+
+import ply.lex as lex
+import ply.yacc as yacc
+
+class LexerBase(object):
+    def new_line(self, lexer, n = 1):
+        lexer.lineno += n
+
+    def t_ANY_error(self, t):
+        def indstr(line, pos):
+            return ''.join([' ' if i != '\t' else '\t' for i in line[:pos]])
+
+        ldata = t.lexer.lexdata
+        line_start = ldata.rfind('\n', 0, t.lexpos) + 1
+        line = ldata[line_start:].split('\n', 1)[0]
+        relpos = t.lexpos - line_start
+
+        raise ValueError("<input>:%d:%d: Illegal character '%s'\n> %s\n> %s^- here" % (
+                t.lexer.lineno, relpos + 1, t.value[0], line, indstr(line, relpos)))
+
+    # general foo
+    def build(self, **kwargs):
+        self.lexer = lex.lex(module = self, **kwargs)
+        return self
+    def test(self, data):
+        self.lexer.input(data)
+        while True:
+             tok = self.lexer.token()
+             if not tok:
+                 break
+             print(tok)
+
+class AMLexer(LexerBase):
+    states = (
+        ('value', 'exclusive'),
+    )
+    tokens = []
+    keywords = []
+
+    val_keywords = ['if', 'include']
+    keywords += val_keywords + ['else', 'endif']
+    tokens += list([x.upper() for x in keywords])
+    tokens += ['NAME', 'VALUE', 'EQ', 'TARGET', 'BUILD']
+    literals = ''
+
+    def t_doc(self, t):
+        r'[ \t]*\#([^\n]*)\n'
+        self.new_line(t.lexer, 1)
+
+    def t_newline(self, t):
+        r'\n+'
+        self.new_line(t.lexer, len(t.value))
+    def t_space_nl(self, t):
+        r'\s+\n'
+        self.new_line(t.lexer, 1)
+        sys.stderr.write('stray whitespace\n')
+
+    def t_target(self, t):
+        r'[-a-zA-Z_\%\$\(\)@/\.0-9 ]*:'
+        t.value = t.value[:-1]
+        t.type = 'TARGET'
+        self.start_value(t)
+        return t
+
+    def t_build(self, t):
+        r'\t'
+        self.start_value(t, 'BUILD')
+
+    def t_name(self, t):
+        r'[a-zA-Z_][a-zA-Z_0-9]*(?!:)'
+        t.type = t.value.upper() if t.value in self.keywords else 'NAME'
+        if t.value in self.val_keywords:
+            self.start_value(t)
+        return t
+    def t_equals(self, t):
+        r'\s*[\+\?]?='
+        t.value = t.value.lstrip()
+        t.type = 'EQ'
+        self.start_value(t)
+        return t
+
+    def start_value(self, t, token = 'VALUE'):
+        t.lexer.push_state('value')
+        t.lexer.value = ''
+        t.lexer.val_token = token
+    def t_value_basic(self, t):
+        r'[^\\\n\#]+'
+        t.lexer.value += t.value
+    def t_value_bsl(self, t):
+        r'\\(?!\n)'
+        t.lexer.value += t.value
+    def t_value_wrap(self, t):
+        r'\\\n'
+        self.new_line(t.lexer, 1)
+    def t_value_end(self, t):
+        r'(\#[^\n]*)?\n'
+        t.value = t.lexer.value.lstrip()
+        t.type = t.lexer.val_token
+
+        self.new_line(t.lexer, 1)
+        t.lexer.pop_state()
+        return t
+
+def pfmt(data):
+    if hasattr(data, 'pretty'):
+        return data.pretty().replace('\n', '\n  ')
+    else:
+        return repr(data)
+
+class AMExpr(object):
+    _args = []
+
+    def __init__(self, *a, **kwa):
+        super().__init__()
+        for k, v in list(zip(self._args[:len(a)], a)) + list(kwa.items()):
+            setattr(self, k, v)
+        for k in self._args[len(a):]:
+            setattr(self, k, None)
+        self.lineno = kwa.get('lineno', None)
+
+    def pretty(self):
+        return '<%s%s>' % (self.__class__.__name__,
+                ''.join([" %s=%s" % (k, pfmt(getattr(self, k))) for k in self._args]))
+
+    def recurse(self, parser):
+        pass
+
+class AMAssign(AMExpr):
+    _args = ['mode', 'var', 'value']
+    sre = re.compile('@([a-zA-Z0-9_]+)@')
+
+class AMConditional(AMExpr):
+    _args = ['cond', 'it_true', 'it_false']
+
+class AMTarget(AMExpr):
+    _args = ['target', 'deps', 'builds']
+
+class AMExprs(AMExpr, list):
+    def __init__(self, items = []):
+        super().__init__()
+        self.extend(items)
+
+    def pretty(self):
+        name = " name='%s'" % (self.name) if hasattr(self, 'name') else ''
+        return '<%s%s (%d)%s%s>' % (self.__class__.__name__, name, len(self),
+                '\n' if len(self) > 0 else '',
+                ''.join(['  %s\n' % pfmt(i) for i in self]))
+
+    def recurse(self, parser):
+        for item in self:
+            item.recurse(parser)
+
+class AMBuild(AMExprs, list):
+    pass
+
+class AMInclude(AMExpr, list):
+    _args = ['filename']
+
+    def pretty(self):
+        name = " filename='%s'" % (self.filename)
+        return '<%s%s (%d)%s%s>' % (self.__class__.__name__, name, len(self),
+                '\n' if len(self) > 0 else '',
+                ''.join(['  %s\n' % pfmt(i) for i in self]))
+
+    def recurse(self, parser):
+        if self.filename is None:
+            breakpoint()
+        with open(self.filename, encoding="UTF-8") as fd:
+            data = fd.read()
+        self.extend(parser(data))
+        for item in self:
+            item.recurse(parser)
+
+#    def __init__(self, items = []):
+#        super().__init__()
+#        self.extend(items)
+#
+#    def pretty(self):
+#        name = " name='%s' " % (self.name) if hasattr(self, 'name') else ''
+#        return '<%s (%d)%s%s>' % (self.__class__.__name__, len(self),
+#                '\n' if len(self) > 0 else '',
+#                ''.join(['  %s\n' % i for i in self]))
+
+
+class AMParser(object):
+    tokens = AMLexer.tokens
+
+    def p_exprs_empty(self, p):
+        '''exprs : '''
+        p[0] = AMExprs()
+    def p_exprs_one(self, p):
+        '''exprs : exprs expr'''
+        p[0] = AMExprs(p[1] + [p[2]])
+
+    def p_expr_cond(self, p):
+        '''expr : IF VALUE exprs ENDIF
+                | IF VALUE exprs ELSE exprs ENDIF'''
+        p[0] = AMConditional(p[2], p[3], None if len(p) <= 5 else p[5])
+    def p_expr_incl(self, p):
+        '''expr : INCLUDE VALUE'''
+        p[0] = AMInclude(p[2])
+    def p_expr_assign(self, p):
+        '''expr : NAME EQ VALUE'''
+        p[0] = AMAssign(p[2], p[1], p[3])
+    def p_expr_target(self, p):
+        '''expr : TARGET VALUE builds'''
+        p[0] = AMTarget(p[1], p[2], p[3])
+
+    def p_builds_empty(self, p):
+        '''builds : '''
+        p[0] = AMBuild()
+    def p_builds_build(self, p):
+        '''builds : builds BUILD'''
+        p[0] = AMBuild(p[1] + [p[2]])
+
+    def build(self, **kwargs):
+        self.parser = yacc.yacc(module = self, start = 'exprs', **kwargs)
+        return self
+
+    def __call__(self, *args, **kwargs):
+        return self.parser.parse(*args, **kwargs)
+
+prefixes = ['noinst', 'nodist', 'dist', 'inst', 'check', 'EXTRA']
+re_canon = re.compile('[^a-zA-Z0-9]')
+re_fixrefs = re.compile(r"""\$\(([^\)]+)\)""")
+flagnames = ['CFLAGS', 'CPPFLAGS', 'LIBADD', 'LDADD', 'LDFLAGS', 'LFLAGS', 'YFLAGS']
+def fixrefs(d):
+    return re_fixrefs.sub('$\\1', d)
+
+lexer = AMLexer().build()
+parser = AMParser().build()
+
+if __name__ == "__main__":
+    for fn in sys.argv[1:]:
+        sys.stderr.write('\033[33m%s\033[m\n' % fn)
+        with open(fn, encoding="UTF-8") as fd:
+            data = fd.read()
+
+        x = parser(data)
+        x.recurse(parser)
+        print(x.pretty())
+
