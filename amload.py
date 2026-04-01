@@ -54,7 +54,7 @@ class MakeLexer(LexerBase):
     tokens = []
     keywords = []
 
-    tokens += ["ACVAR", "MAKEVAR", "MAKEFUNC", "MAKEFUNCARG", "NORMAL", "WHITESPACE"]
+    tokens += ["ACVAR", "MAKEVAR", "MAKEFUNC", "MAKEFUNCARG", "NORMAL", "WHITESPACE", "SHELL"]
 
     def t_makevar_single(self, t):
         r"\$[^$({]"
@@ -62,16 +62,21 @@ class MakeLexer(LexerBase):
         t.type = "MAKEVAR"
         return t
 
+    def stack_push(self, t, opener):
+        t.lexer.stack.append({ "(": ")", "{": "}" }[opener])
+
     def t_begin_make(self, t):
         r"\$[({]"
         t.lexer.push_state("make")
         t.lexer.value = ""
-        t.lexer.make_end = { "(": ")", "{": "}" }[t.value[1]]
+        t.lexer.stack = []
+        self.stack_push(t, t.value[1])
 
     def t_make_normal(self, t):
         r"[a-zA-Z0-9_]+[)}]"
         t.lexer.pop_state()
-        assert t.value[-1] == t.lexer.make_end
+        closer = t.lexer.stack.pop(-1)
+        assert t.value[-1] == closer
         t.value = t.value[:-1]
         t.type = "MAKEVAR"
         return t
@@ -85,10 +90,23 @@ class MakeLexer(LexerBase):
         return t
 
     def t_makefunc_arg(self, t):
-        r"[^)}]*[)}]"
+        r"[^{()}]+"
+        t.lexer.value += t.value
+
+    def t_makefunc_open(self, t):
+        r"[({]"
+        self.stack_push(t, t.value)
+        self.lexer.value += t.value
+
+    def t_makefunc_close(self, t):
+        r"[)}]"
+        closer = t.lexer.stack.pop(-1)
+        assert t.value[-1] == closer
+        if t.lexer.stack:
+            self.lexer.value += t.value
+            return
         t.lexer.pop_state()
-        assert t.value[-1] == t.lexer.make_end
-        t.value = t.value[:-1]
+        t.value = t.lexer.value
         t.type = "MAKEFUNCARG"
         return t
 
@@ -109,8 +127,13 @@ class MakeLexer(LexerBase):
         return t
 
     def t_normal(self, t):
-        r"[^$@ \t\n]+"
+        r"""[^$@ \t\n`]+"""
         t.type = "NORMAL"
+        return t
+
+    def t_subststring(self, t):
+        r"`[^`]+`"
+        t.type = "SHELL"
         return t
 
     def t_escaped_dollar(self, t):
@@ -490,6 +513,9 @@ class ATarget:
     def dump(self):
         print(repr(self))
 
+    def emit(self, c, stream):
+        pass
+
 class ATOther(ATarget):
     def __repr__(self):
         return f"<{self.__class__.__name__} {self.mode} {self.name!r} ({self.dirvar!r}, {self.conds.short() or '<always>'}, {len(self.args)} args)>"
@@ -499,6 +525,59 @@ never_expand = {
     "AM_CPPFLAGS",
     "CPPFLAGS_BASE",
 }
+
+def _flatten_var(mvars, values, parentconds=None, recurse=False):
+    parentconds = parentconds or CondStack()
+
+    def process(element):
+        if not element:
+            return
+        if len(element) == 1 and element[0].type == "NORMAL":
+            yield (element[0].value, conds)
+        elif len(element) == 1 and element[0].type == "MAKEVAR":
+            if not recurse:
+                mvars.source_lists.add(element[0].value)
+                mvars[element[0].value]
+                yield (element, conds)
+                return
+            #print("recursing into variable")
+            if element[0].value in never_expand:
+                print(f"\033[36mnever_expand {element[0].value!r}\033[m")
+                return
+            try:
+                values.extend((assign, varconds + conds) for assign, varconds in mvars[element[0].value])
+                print(f"\033[32mexpand {element[0].value!r}\033[m")
+            except KeyError:
+                print(f"\033[33mreference to undefined {element[0].value!r}\033[m")
+                yield ("${" + element[0].value + "}", conds)
+        elif len(element) == 1 and element[0].type == "ACVAR":
+            yield ("${" + element[0].value + "}", conds)
+        else:
+            yield (element, conds)
+
+    while values:
+        assign, conds = values.pop(0)
+        if not (conds + parentconds).possible():
+            print(f"\033[91mimpossible condition for {assign.value!r}: {conds.short()} + {parentconds.short()}\033[m")
+            continue
+        conds = conds - parentconds
+
+        vlex = MakeLexer().build()
+        vlex.lexer.input(assign.value)
+
+        element = []
+        while tok := vlex.lexer.token():
+            if element and tok.type == "NORMAL" and element[-1].type == "NORMAL":
+                element[-1].value += tok.value
+                continue
+            if tok.type == "WHITESPACE":
+                yield from process(element)
+                element = []
+                continue
+            element.append(tok)
+
+        yield from process(element)
+
 
 class ATCompiledBase(ATarget):
     _flag_names = {
@@ -526,58 +605,13 @@ class ATCompiledBase(ATarget):
         for flag in self._flag_names:
             if flag not in self.args:
                 continue
-            self.flags[flag] = list(self._flatten_var(mvars, self.args[flag], recurse=True))
-
-    def _flatten_var(self, mvars, values, recurse=False):
-        def process(element):
-            if not element:
-                return
-            if len(element) == 1 and element[0].type == "NORMAL":
-                yield (element[0].value, conds)
-            elif recurse and len(element) == 1 and element[0].type == "MAKEVAR":
-                #print("recursing into variable")
-                if element[0].value in never_expand:
-                    print(f"\033[36mnever_expand {element[0].value!r}\033[m")
-                    return
-                try:
-                    values.extend((assign, varconds + conds) for assign, varconds in mvars[element[0].value])
-                    print(f"\033[32mexpand {element[0].value!r}\033[m")
-                except KeyError:
-                    print(f"\033[33mreference to undefined {element[0].value!r}\033[m")
-                    yield ("${" + element[0].value + "}", conds)
-            else:
-                yield (element, conds)
-
-        while values:
-            assign, conds = values.pop(0)
-            if not (conds + self.conds).possible():
-                print(f"\033[91mimpossible condition for {assign.value!r}: {conds.short()} + {self.conds.short()}\033[m")
-                continue
-            conds = conds - self.conds
-
-            vlex = MakeLexer().build()
-            vlex.lexer.input(assign.value)
-
-            element = []
-            while tok := vlex.lexer.token():
-                #if tok.value == "MODULE_LDFLAGS":
-                    #    breakpoint()
-                if element and tok.type == "NORMAL" and element[-1].type == "NORMAL":
-                    element[-1].value += tok.value
-                    continue
-                if tok.type == "WHITESPACE":
-                    yield from process(element)
-                    element = []
-                    continue
-                element.append(tok)
-
-            yield from process(element)
+            self.flags[flag] = list(_flatten_var(mvars, self.args[flag], self.conds, recurse=True))
 
     def process_sources(self, mvars, prefix):
         nodist = prefix == "nodist_"
         sources = self.args.get(prefix + "SOURCES", [])
 
-        self.sources.extend(self._flatten_var(mvars, sources))
+        self.sources.extend(_flatten_var(mvars, sources, self.conds))
 
     def dump(self):
         super().dump()
@@ -590,11 +624,130 @@ class ATCompiledBase(ATarget):
             #    continue
         print("")
 
+    def emit(self, c, stream):
+        super().emit(c, stream)
+        basepath = os.path.dirname(self.name)
+
+        name = re_canon.sub("_", os.path.basename(self.name))
+        emit_source_list(c, stream, name, self.sources, basepath, f"\n  # {self.name}")
+
+def display_source(c, basepath, src):
+    relsrc = os.path.relpath(src, basepath)
+    if src.endswith(".yang.c"):
+        return "yang_embed.process('" + src.removesuffix(".c") + "')"
+    if src in c.clippy_scan:
+        return "clippy.process('" + relsrc + "')"
+    return "'" + relsrc + "'"
+
+def emit_source_list(c, stream, name, items, basepath=".", comment=""):
+    stream.write(f"{name}_sources = [{comment}\n")
+    for source, conds in items:
+        if conds:
+            stream.write(f"  #{source} {conds.short()} -- FIXME!\n")
+            continue
+        if isinstance(source, str):
+            stream.write("  " + display_source(c, basepath, source) + ",\n")
+        elif len(source) == 1 and source[0].type == "MAKEVAR":
+            stream.write("  " + source[0].value.lower() + ",\n")
+        else:
+            stream.write(f"  #{source} -- FIXME!\n")
+    stream.write("]\n\n")
+
+
+deps = {
+    "${LIBCAP}": "libcap",
+    "${LIBREADLINE}": "libreadline",
+    "${LIBPAM}": "libpam",
+    "${LIBYANG_LIBS}": "libyang",
+    "${UST_LIBS}": "tracing",
+    "${LIBM}": "libm",
+    "-lm": "libm",
+    "-lpthread": None,
+    "-lcunit": "cunit",
+}
+
 class ATProgram(ATCompiledBase):
-    pass
+    def emit(self, c, stream):
+        return
+        if self.name == "tools/frr-llvm-cg" or self.name.startswith("tests/") or self.name == "lib/clippy":
+            return
+        super().emit(c, stream)
+
+        basepath = os.path.dirname(self.name)
+        name = re_canon.sub("_", os.path.basename(self.name))
+
+        stream.write(f"""{name}_bin = executable('{name}',
+  sources: {name}_sources,
+""")
+        args = {}
+        for flag, vals in self.flags.items():
+            if not vals:
+                continue
+            if flag == "LDADD":
+                for val, cond in vals:
+                    if cond:
+                        stream.write(f"    # FIXME: {val} {cond.short()}\n")
+                        continue
+
+                    if isinstance(val, list) and val[0].type == "MAKEVAR" and val[0].value == "top_builddir":
+                        if len(val) == 2 and val[1].type == "NORMAL":
+                            val = val[1].value.lstrip("/")
+
+                    if val == "lib/libfrr.la":
+                        args.setdefault("link_with", []).append("libfrr")
+                    elif isinstance(val, str) and val.endswith(".a"):
+                        args.setdefault("link_with", []).append(val.removesuffix(".a").split("/")[-1])
+                    elif isinstance(val, str) and val.endswith(".la"):
+                        args.setdefault("link_with", []).append(val.removesuffix(".la").split("/")[-1])
+                    elif isinstance(val, str) and val in deps:
+                        dep = deps[val]
+                        if dep is None:
+                            continue
+                        thisdeps = args.setdefault("dependencies", [])
+                        if dep not in thisdeps:
+                            thisdeps.append(dep)
+                    elif val == "${LIBS}":
+                        pass
+                        # nothing
+                    else:
+                        breakpoint()
+            elif flag in ["CPPFLAGS", "CFLAGS"]:
+                for val, cond in vals:
+                    assert not cond
+                    if val == "${SAN_FLAGS}":
+                        continue
+                    elif isinstance(val, str) and val.startswith("-D"):
+                        args.setdefault("c_args", []).append("'" + val + "'")
+                    elif isinstance(val, list) and val[0].value == "-I":
+                        stream.write(f"    # FIXME: {val}\n")
+                    else:
+                        breakpoint()
+            #elif flag == "CFLAGS":
+            #    for val, cond in vals:
+            #        assert not cond
+            #        if isinstance(val, str):
+            #            args.setdefault("c_args", []).append("'" + val + "'")
+            #        else:
+            #            breakpoint()
+            else:
+                breakpoint()
+
+        for argt, vals in args.items():
+            stream.write(f"  {argt}: [\n")
+            for arg in vals:
+                stream.write(f"    {arg},\n")
+            stream.write("  ],\n")
+
+        stream.write(")\n\n")
 
 class ATLibrary(ATCompiledBase):
-    pass
+    def emit(self, c, stream):
+        super().emit(c, stream)
+
+        basepath = os.path.dirname(self.name)
+        name = re_canon.sub("_", os.path.basename(self.name))
+
+        stream.write(f"""#{name}_a = library()\n\n""")
 
 class ATLibtoolLibrary(ATCompiledBase):
     pass
@@ -650,6 +803,7 @@ class DictUsageProxy: #(T.Mapping[KT, VT]):
     def __init__(self, target: T.Mapping[KT, VT]):
         self._target = target
         self.used = set()
+        self.source_lists = set()
 
     def __contains__(self, key: KT) -> bool:
         return key in self._target
@@ -794,6 +948,8 @@ class Collector:
                 target.process(mvars)
                 target.dump()
 
+        self.source_lists = mvars.source_lists
+
         def show(vals, rmconds=CondStack()):
             ret = []
             for assign, vconds in vals:
@@ -805,11 +961,14 @@ class Collector:
                     ret.append(value)
             return ", ".join(ret)
 
+        return
+
         print("unused:")
         for k, v in self.mvars.items():
             if k in mvars.used:
                 continue
             print(f"\t{k} = {show(v)}")
+            continue
             for assign, conds in v:
                 print(f"\t++ {conds.short()}")
                 vlex = MakeLexer().build()
@@ -834,6 +993,18 @@ if __name__ == "__main__":
         c = Collector()
         file.walk(c.walk)
         c.am_targets()
+
+        print("\033[107m === \033[K\033[m")
+
+        c.clippy_scan = [i[0] for i in _flatten_var(c.mvars, c.mvars["clippy_scan"])]
+
+        for slist in c.source_lists:
+            srcs = _flatten_var(c.mvars, c.mvars[slist])
+            emit_source_list(c, sys.stdout, slist.lower(), srcs)
+
+        for mode, targets in c.am_items.items():
+            for target in targets:
+                target.emit(c, sys.stdout)
 
         #print("\n".join(c.mvars.keys()))
 
