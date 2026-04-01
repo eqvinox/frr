@@ -9,8 +9,8 @@ import subprocess
 import re
 import typing as T
 
-import ply.lex as lex
-import ply.yacc as yacc
+import ply.lex as lex # type: ignore[import-untyped]
+import ply.yacc as yacc # type: ignore[import-untyped]
 
 if T.TYPE_CHECKING:
     from ply.yacc import YaccProduction
@@ -138,8 +138,12 @@ class ParserBase:
 AMParser = ParserBase(tokens=AMLexer.tokens)
 
 class AMExpr:
-    _args = []
-    rules = []
+    _args: list[str]
+
+    def __init_subclass__(cls, *args, **kwargs):
+        super().__init_subclass__(*args, **kwargs)
+        if not hasattr(cls, "_args"):
+            cls._args = list(cls.__annotations__.keys())
 
     def __init__(self, p, argidx, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -169,43 +173,11 @@ class AMExpr:
     def recurse(self, parser):
         pass
 
-class AMAssign(AMExpr):
-    _args = ['mode', 'var', 'value']
+I = T.TypeVar('I', bound=AMExpr)
 
-    @AMParser.rule
-    def p_expr_assign(p):
-        '''expr : NAME EQ VALUE'''
-        p[0] = AMAssign(p, [2, 1, 3])
-
-class AMConditional(AMExpr):
-    _args = ['cond', 'it_true', 'it_false']
-
-    @AMParser.rule
-    def p_expr_cond(p):
-        '''expr : IF VALUE exprs ENDIF
-                | IF VALUE exprs ELSE exprs ENDIF'''
-        p[0] = AMConditional(p, [2, 3, 5])
-
-class AMTarget(AMExpr):
-    _args = ['target', 'deps', 'builds']
-
-    @AMParser.rule
-    def p_expr_target(p):
-        '''expr : TARGET VALUE builds'''
-        p[0] = AMTarget(p, [1, 2, 3])
-
-class AMExprs(AMExpr, list):
-    _args = ['_list', '_item']
-
-    @AMParser.rule
-    def p_exprs_empty(p):
-        '''exprs : '''
-        p[0] = AMExprs(p, [])
-
-    @AMParser.rule
-    def p_exprs_one(p):
-        '''exprs : exprs expr'''
-        p[0] = AMExprs(p, [1, 2])
+class AMExprsBase(AMExpr, list[I]):
+    _list: list[I] | None
+    _item: I | None
 
     def __init__(self, *args, **kwargs): #items = [], append = None, **kwa):
         super().__init__(*args, **kwargs)
@@ -228,22 +200,76 @@ class AMExprs(AMExpr, list):
         for item in self:
             item.recurse(parser)
 
-class AMBuild(AMExprs, list):
+class AMAssign(AMExpr):
+    mode: str
+    var: str
+    value: str
+
     @AMParser.rule
-    def p_builds_empty(p):
+    def p_expr_assign(p: YaccProduction):
+        '''expr : NAME EQ VALUE'''
+        p[0] = AMAssign(p, [2, 1, 3])
+
+class AMConditional(AMExpr):
+    cond: str
+    it_true: AMExprs
+    it_false: AMExprs | None
+
+    @AMParser.rule
+    def p_expr_cond(p: YaccProduction):
+        '''expr : IF VALUE exprs ENDIF
+                | IF VALUE exprs ELSE exprs ENDIF'''
+        p[0] = AMConditional(p, [2, 3, 5])
+
+class AMExprs(AMExprsBase[AMExpr]):
+    @AMParser.rule
+    def p_exprs_empty(p: YaccProduction):
+        '''exprs : '''
+        p[0] = AMExprs(p, [])
+
+    @AMParser.rule
+    def p_exprs_one(p: YaccProduction):
+        '''exprs : exprs expr'''
+        p[0] = AMExprs(p, [1, 2])
+
+
+class AMBuildCmd(AMExpr):
+    cmd: str
+
+    @AMParser.rule
+    def p_build(p: YaccProduction):
+        '''buildcmd : BUILD'''
+        p[0] = AMBuildCmd(p, [1])
+
+
+class AMBuild(AMExprsBase[AMBuildCmd]):
+    @AMParser.rule
+    def p_builds_empty(p: YaccProduction):
         '''builds : '''
         p[0] = AMBuild(p, [])
 
     @AMParser.rule
-    def p_builds_build(p):
-        '''builds : builds BUILD'''
+    def p_builds_build(p: YaccProduction):
+        '''builds : builds buildcmd'''
         p[0] = AMBuild(p, [1, 2])
 
-class AMInclude(AMExpr, list):
-    _args = ['filename']
+
+class AMTarget(AMExpr):
+    target: str
+    deps: str
+    builds: AMBuild
 
     @AMParser.rule
-    def p_expr_incl(p):
+    def p_expr_target(p: YaccProduction):
+        '''expr : TARGET VALUE builds'''
+        p[0] = AMTarget(p, [1, 2, 3])
+
+
+class AMInclude(AMExpr, list):
+    filename: str
+
+    @AMParser.rule
+    def p_expr_incl(p: YaccProduction):
         '''expr : INCLUDE VALUE'''
         p[0] = AMInclude(p, [2])
 
