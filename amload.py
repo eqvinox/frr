@@ -9,7 +9,7 @@ import re
 import ply.lex as lex
 import ply.yacc as yacc
 
-class LexerBase(object):
+class LexerBase:
     def new_line(self, lexer, n = 1):
         lexer.lineno += n
 
@@ -29,6 +29,7 @@ class LexerBase(object):
     def build(self, **kwargs):
         self.lexer = lex.lex(module = self, **kwargs)
         return self
+
     def test(self, data):
         self.lexer.input(data)
         while True:
@@ -57,6 +58,7 @@ class AMLexer(LexerBase):
     def t_newline(self, t):
         r'\n+'
         self.new_line(t.lexer, len(t.value))
+
     def t_space_nl(self, t):
         r'\s+\n'
         self.new_line(t.lexer, 1)
@@ -79,6 +81,7 @@ class AMLexer(LexerBase):
         if t.value in self.val_keywords:
             self.start_value(t)
         return t
+
     def t_equals(self, t):
         r'\s*[\+\?]?='
         t.value = t.value.lstrip()
@@ -90,15 +93,19 @@ class AMLexer(LexerBase):
         t.lexer.push_state('value')
         t.lexer.value = ''
         t.lexer.val_token = token
+
     def t_value_basic(self, t):
         r'[^\\\n\#]+'
         t.lexer.value += t.value
+
     def t_value_bsl(self, t):
         r'\\(?!\n)'
         t.lexer.value += t.value
+
     def t_value_wrap(self, t):
         r'\\\n'
         self.new_line(t.lexer, 1)
+
     def t_value_end(self, t):
         r'(\#[^\n]*)?\n'
         t.value = t.lexer.value.lstrip()
@@ -108,26 +115,28 @@ class AMLexer(LexerBase):
         t.lexer.pop_state()
         return t
 
-def pfmt(data):
-    if hasattr(data, 'pretty'):
-        return data.pretty().replace('\n', '\n  ')
-    else:
-        return repr(data)
-
-class AMExpr(object):
+class AMExpr:
     _args = []
 
-    def __init__(self, *a, **kwa):
-        super().__init__()
+    def __init__(self, *a, super_a=[], super_kwa={}, p=None, **kwa):
+        super().__init__(*super_a, **super_kwa)
         for k, v in list(zip(self._args[:len(a)], a)) + list(kwa.items()):
             setattr(self, k, v)
         for k in self._args[len(a):]:
             setattr(self, k, None)
-        self.lineno = kwa.get('lineno', None)
+        #if p:
+        #self.lineno = kwa.get('lineno', None)
+
+    @staticmethod
+    def pretty_maybe(val):
+        if hasattr(val, 'pretty'):
+            return val.pretty().replace('\n', '\n  ')
+        else:
+            return repr(val)
 
     def pretty(self):
         return '<%s%s>' % (self.__class__.__name__,
-                ''.join([" %s=%s" % (k, pfmt(getattr(self, k))) for k in self._args]))
+                ''.join([" %s=%s" % (k, self.pretty_maybe(getattr(self, k))) for k in self._args]))
 
     def recurse(self, parser):
         pass
@@ -143,15 +152,19 @@ class AMTarget(AMExpr):
     _args = ['target', 'deps', 'builds']
 
 class AMExprs(AMExpr, list):
-    def __init__(self, items = []):
-        super().__init__()
-        self.extend(items)
+    def __init__(self, items = [], **kwa):
+        super().__init__(super_a=[items], **kwa)
 
     def pretty(self):
         name = " name='%s'" % (self.name) if hasattr(self, 'name') else ''
-        return '<%s%s (%d)%s%s>' % (self.__class__.__name__, name, len(self),
+        if hasattr(self, "lineno"):
+            breakpoint()
+            lineno = " #%d" % (self.lineno) if self.lineno else ""
+        else:
+            lineno = ""
+        return '<%s%s%s (%d)%s%s>' % (self.__class__.__name__, lineno, name, len(self),
                 '\n' if len(self) > 0 else '',
-                ''.join(['  %s\n' % pfmt(i) for i in self]))
+                ''.join(['  %s\n' % self.pretty_maybe(i) for i in self]))
 
     def recurse(self, parser):
         for item in self:
@@ -167,7 +180,7 @@ class AMInclude(AMExpr, list):
         name = " filename='%s'" % (self.filename)
         return '<%s%s (%d)%s%s>' % (self.__class__.__name__, name, len(self),
                 '\n' if len(self) > 0 else '',
-                ''.join(['  %s\n' % pfmt(i) for i in self]))
+                ''.join(['  %s\n' % i.pretty() for i in self]))
 
     def recurse(self, parser):
         if self.filename is None:
@@ -194,10 +207,10 @@ class AMParser(object):
 
     def p_exprs_empty(self, p):
         '''exprs : '''
-        p[0] = AMExprs()
+        p[0] = AMExprs(p=p)
     def p_exprs_one(self, p):
         '''exprs : exprs expr'''
-        p[0] = AMExprs(p[1] + [p[2]])
+        p[0] = AMExprs(p[1] + [p[2]], p=p)
 
     def p_expr_cond(self, p):
         '''expr : IF VALUE exprs ENDIF
@@ -225,7 +238,20 @@ class AMParser(object):
         return self
 
     def __call__(self, *args, **kwargs):
-        return self.parser.parse(*args, **kwargs)
+        return self.parser.parse(*args, tracking=True, **kwargs)
+
+class AMFile(AMExprs):
+    lexer = AMLexer().build()
+    parser = AMParser().build()
+
+    def __init__(self, filename):
+        self.filename = filename
+        #self.lineno = None
+
+    def load(self):
+        with open(self.filename, encoding="UTF-8") as fd:
+            text = fd.read()
+        self.extend(self.parser(text))
 
 prefixes = ['noinst', 'nodist', 'dist', 'inst', 'check', 'EXTRA']
 re_canon = re.compile('[^a-zA-Z0-9]')
@@ -234,16 +260,16 @@ flagnames = ['CFLAGS', 'CPPFLAGS', 'LIBADD', 'LDADD', 'LDFLAGS', 'LFLAGS', 'YFLA
 def fixrefs(d):
     return re_fixrefs.sub('$\\1', d)
 
-lexer = AMLexer().build()
-parser = AMParser().build()
-
 if __name__ == "__main__":
     for fn in sys.argv[1:]:
         sys.stderr.write('\033[33m%s\033[m\n' % fn)
-        with open(fn, encoding="UTF-8") as fd:
-            data = fd.read()
+        file = AMFile(fn)
+        file.load()
+        print(file.pretty())
+        #with open(fn, encoding="UTF-8") as fd:
+        #    data = fd.read()
 
-        x = parser(data)
-        x.recurse(parser)
-        print(x.pretty())
+        #x = parser(data)
+        #x.recurse(parser)
+        #print(x.pretty())
 
