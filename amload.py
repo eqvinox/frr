@@ -8,6 +8,7 @@ import sys
 import os
 import subprocess
 import re
+from dataclasses import dataclass, field
 import typing as T
 
 import ply.lex as lex  # type: ignore[import-untyped]
@@ -226,14 +227,20 @@ class CondStack(list[T.Tuple["AMConditional", bool]]):
             return ("" if arc else "!") + cond.cond
         return " && ".join(item(cond, arc) for cond, arc in self)
 
+    def possible(self):
+        conds = {}
+        for cond, arc in self:
+            if conds.get(cond.cond, arc) != arc:
+                return False
+            conds[cond.cond] = arc
+        return True
+
     def __add__(self, other):
         return CondStack(list(self) + other)
 
     def __sub__(self, other):
         new = CondStack()
         for cond, arc in self:
-            if (cond, not arc) in other:
-                raise ValueError("impossible!")
             if (cond, arc) in other:
                 continue
             new.append((cond, arc))
@@ -355,6 +362,10 @@ class AMConditional(AMExpr):
         if self.it_false is not None:
             self.it_false._walk(cb, condstack + [(self, False)])
 
+    def __eq__(self, other):
+        return self.cond == other.cond
+
+
 class AMExprs(AMExprsBase[AMExpr]):
     @AMParser.rule
     def p_exprs_empty(p: YaccProduction):
@@ -451,24 +462,151 @@ class AMFile(AMInclude):
         super()._walk(cb, CondStack())
 
 
-code_flags = [
-    "SOURCES",
-    "CFLAGS",
-    "CPPFLAGS",
-    "LIBADD",
-    "LDADD",
-    "LDFLAGS",
-    "LFLAGS",
-    "YFLAGS",
-]
+@dataclass
+class ATarget:
+    mode: str
+    name: str
+    dirvar: str | None
+    dstflags: set[str]
+    conds: CondStack
+
+    _arg_names: T.ClassVar[set[str]] = set()
+    args: dict[str, list[tuple[AMAssign, CondStack]]] = field(init=False, default_factory=dict)
+
+    def process(self, mvars: T.Mapping[str, list[tuple[AMAssign, CondStack]]]):
+        canon = re_canon.sub("_", self.name)
+
+        for arg_name in self._arg_names:
+            for prefix in ["", "nodist_"]:
+                arg_fullname = prefix + canon + "_" + arg_name
+                if arg_fullname in mvars:
+                    self.args[prefix + arg_name] = mvars[arg_fullname]
+            
+        #def __init__(self, name: str, dirvar: str | None, dstflags: set[str], conds: CondStack):
+
+    def __repr__(self):
+        return f"<{self.__class__.__name__} {self.name!r} ({self.dirvar!r}, {self.conds.short() or '<always>'}, {len(self.args)} args)>"
+
+    def dump(self):
+        print(repr(self))
+
+class ATOther(ATarget):
+    def __repr__(self):
+        return f"<{self.__class__.__name__} {self.mode} {self.name!r} ({self.dirvar!r}, {self.conds.short() or '<always>'}, {len(self.args)} args)>"
+
+never_expand = {
+    "AM_CFLAGS",
+    "AM_CPPFLAGS",
+    "CPPFLAGS_BASE",
+}
+
+class ATCompiledBase(ATarget):
+    _flag_names = {
+        "CFLAGS",
+        "CPPFLAGS",
+        "CXXFLAGS",
+        "LIBADD",
+        "LDADD",
+        "LDFLAGS",
+        "LFLAGS",
+        "YFLAGS",
+    }
+    _arg_names = {
+        "SOURCES",
+    } | _flag_names
+
+    def process(self, mvars: T.Mapping[str, list[tuple[AMAssign, CondStack]]]):
+        super().process(mvars)
+
+        self.sources = []
+        self.process_sources(mvars, "")
+        self.process_sources(mvars, "nodist_")
+
+        self.flags = {}
+        for flag in self._flag_names:
+            if flag not in self.args:
+                continue
+            self.flags[flag] = list(self._flatten_var(mvars, self.args[flag], recurse=True))
+
+    def _flatten_var(self, mvars, values, recurse=False):
+        def process(element):
+            if not element:
+                return
+            if len(element) == 1 and element[0].type == "NORMAL":
+                yield (element[0].value, conds)
+            elif recurse and len(element) == 1 and element[0].type == "MAKEVAR":
+                #print("recursing into variable")
+                if element[0].value in never_expand:
+                    print(f"\033[36mnever_expand {element[0].value!r}\033[m")
+                    return
+                try:
+                    values.extend((assign, varconds + conds) for assign, varconds in mvars[element[0].value])
+                    print(f"\033[32mexpand {element[0].value!r}\033[m")
+                except KeyError:
+                    print(f"\033[33mreference to undefined {element[0].value!r}\033[m")
+                    yield ("${" + element[0].value + "}", conds)
+            else:
+                yield (element, conds)
+
+        while values:
+            assign, conds = values.pop(0)
+            if not (conds + self.conds).possible():
+                print(f"\033[91mimpossible condition for {assign.value!r}: {conds.short()} + {self.conds.short()}\033[m")
+                continue
+            conds = conds - self.conds
+
+            vlex = MakeLexer().build()
+            vlex.lexer.input(assign.value)
+
+            element = []
+            while tok := vlex.lexer.token():
+                #if tok.value == "MODULE_LDFLAGS":
+                    #    breakpoint()
+                if element and tok.type == "NORMAL" and element[-1].type == "NORMAL":
+                    element[-1].value += tok.value
+                    continue
+                if tok.type == "WHITESPACE":
+                    yield from process(element)
+                    element = []
+                    continue
+                element.append(tok)
+
+            yield from process(element)
+
+    def process_sources(self, mvars, prefix):
+        nodist = prefix == "nodist_"
+        sources = self.args.get(prefix + "SOURCES", [])
+
+        self.sources.extend(self._flatten_var(mvars, sources))
+
+    def dump(self):
+        super().dump()
+        for src, conds in self.sources:
+            print(f"\tsrc: [{conds.short()}] {src}")
+        for k, v in self.flags.items():
+            for item, conds in v:
+                print(f"\t{k}: [{conds.short()}] {item}")
+            #if k == "SOURCES":
+            #    continue
+        print("")
+
+class ATProgram(ATCompiledBase):
+    pass
+
+class ATLibrary(ATCompiledBase):
+    pass
+
+class ATLibtoolLibrary(ATCompiledBase):
+    pass
+
 mainkeys = {
-    "PROGRAMS": code_flags,
-    "SCRIPTS": [],
-    "HEADERS": [],
-    "LIBRARIES": code_flags,
-    "LTLIBRARIES": code_flags,
-    "MANS": [],
-    "DATA": [],
+    "PROGRAMS": ATProgram,
+    "SCRIPTS": ATOther,
+    "HEADERS": ATOther,
+    "LIBRARIES": ATLibrary,
+    "LTLIBRARIES": ATLibtoolLibrary,
+    "MANS": ATOther,
+    "DATA": ATOther,
 }
 
 prefixes = ["noinst", "nodist", "nobase", "dist", "inst", "check", "EXTRA"]
@@ -618,9 +756,12 @@ class Collector:
         for mainkey in sorted(self.mainkeys):
             category, mode = mainkey.rsplit("_", 1)
             modeitems = self.am_items.setdefault(mode, [])
+            modeclass = mainkeys[mode]
 
+            dstflags = set()
             dirvar = category
             while (s := dirvar.split("_", 1))[0] in prefixes:
+                dstflags.add(s[0])
                 if len(s) == 1:
                     dirvar = None
                     break
@@ -628,23 +769,15 @@ class Collector:
             else:
                 dirvars.add(dirvar)
 
-            #print(f"=== {mainkey} / {dirvar}dir ===")
-
             assert mvars[mainkey][0][0].mode == "="
-            #condsets = {}
 
             for assign, conds in mvars[mainkey]:
-                #condkey = conds.short()
-                #itemlist = condsets.setdefault(condkey, [])
                 vals = assign.value.strip().split()
-                #itemlist.extend(vals)
 
                 for val in vals:
-                    modeitems.append((category, conds, val, dirvar))
-                #print(f"\t{i.str_inc():30} {conds.short()}")
-            #for cond, items in condsets.items():
-            #    print(f"\t{cond+':':10} {', '.join(items)}")
-        print("=====")
+                    modeitems.append(modeclass(mode, val, dirvar, dstflags, conds))
+
+        print("== automake destination directories:")
         for dirvar in sorted(dirvars):
             if dirvar + "dir" in mvars:
                 dirval = mvars[dirvar + 'dir']
@@ -653,8 +786,14 @@ class Collector:
 
                 print(f"\t{dirvar:20} = {val.value!r} [{conds.short()}]")
             else:
-                print(f"\t{dirvar:20} =   <undefined>")
-        print("=====")
+                print(f"\t{dirvar:20} =   <unspecified>")
+        print("")
+
+        for mode, targets in self.am_items.items():
+            for target in targets:
+                target.process(mvars)
+                target.dump()
+
         def show(vals, rmconds=CondStack()):
             ret = []
             for assign, vconds in vals:
@@ -665,21 +804,6 @@ class Collector:
                 else:
                     ret.append(value)
             return ", ".join(ret)
-
-        for mode, items in self.am_items.items():
-            print(f"=== {mode} ===")
-            fmt = Formatter()
-            for category, conds, val, dirvar in sorted(items, key=lambda i: i[2]):
-                fmt(f"[{dirvar or '.'}]", conds.short(), val)
-                canon = re_canon.sub("_", val)
-
-                for flag in mainkeys[mode]:
-                    for prefix in ["", "nodist_"]:
-                        flagvar = prefix + canon + "_" + flag
-                        if flagvar in mvars:
-                            fmt(f"\t\t>> {flagvar+' =':25} {show(mvars[flagvar], conds)}")
-
-            fmt.out(prefix="\t")
 
         print("unused:")
         for k, v in self.mvars.items():
