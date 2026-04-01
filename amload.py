@@ -48,6 +48,86 @@ class LexerBase:
             print(tok)
 
 
+class MakeLexer(LexerBase):
+    states = (("autoconf", "exclusive"), ("make", "exclusive"), ("makefunc", "exclusive"))
+    tokens = []
+    keywords = []
+
+    tokens += ["ACVAR", "MAKEVAR", "MAKEFUNC", "MAKEFUNCARG", "NORMAL", "WHITESPACE"]
+
+    def t_makevar_single(self, t):
+        r"\$[^$({]"
+        t.value = t.value[1]
+        t.type = "MAKEVAR"
+        return t
+
+    def t_begin_make(self, t):
+        r"\$[({]"
+        t.lexer.push_state("make")
+        t.lexer.value = ""
+        t.lexer.make_end = { "(": ")", "{": "}" }[t.value[1]]
+
+    def t_make_normal(self, t):
+        r"[a-zA-Z0-9_]+[)}]"
+        t.lexer.pop_state()
+        assert t.value[-1] == t.lexer.make_end
+        t.value = t.value[:-1]
+        t.type = "MAKEVAR"
+        return t
+
+    def t_make_func(self, t):
+        r"[a-zA-Z0-9_]+[ \t\n]"
+        t.value = t.value[:-1]
+        t.type = "MAKEFUNC"
+        t.lexer.pop_state()
+        t.lexer.push_state("makefunc")
+        return t
+
+    def t_makefunc_arg(self, t):
+        r"[^)}]*[)}]"
+        t.lexer.pop_state()
+        assert t.value[-1] == t.lexer.make_end
+        t.value = t.value[:-1]
+        t.type = "MAKEFUNCARG"
+        return t
+
+    def t_begin_autoconf(self, t):
+        r"@"
+        t.lexer.push_state("autoconf")
+        t.lexer.value = ""
+
+    def t_autoconf_arg(self, t):
+        r"[a-zA-Z0-9_]+"
+        t.lexer.value += t.value
+
+    def t_autoconf_end(self, t):
+        r"@"
+        t.lexer.pop_state()
+        t.value = t.lexer.value
+        t.type = "ACVAR"
+        return t
+
+    def t_normal(self, t):
+        r"[^$@ \t\n]+"
+        t.type = "NORMAL"
+        return t
+
+    def t_escaped_dollar(self, t):
+        r"\$\$"
+        t.value = "$"
+        t.type = "NORMAL"
+        return t
+
+    def t_wsp(self, t):
+        r"[ \t\n]+"
+        t.type = "WHITESPACE"
+        return t
+
+if __name__ == "__main__" and (sys.argv + [""])[1] == "lextest":
+    lexer = MakeLexer().build()
+    lexer.test(sys.argv[2])
+    sys.exit(0)
+
 class AMLexer(LexerBase):
     states = (("value", "exclusive"),)
     tokens = []
@@ -606,6 +686,15 @@ class Collector:
             if k in mvars.used:
                 continue
             print(f"\t{k} = {show(v)}")
+            for assign, conds in v:
+                print(f"\t++ {conds.short()}")
+                vlex = MakeLexer().build()
+                try:
+                    vlex.lexer.input(assign.value)
+                    while tok := vlex.lexer.token():
+                        print(f"\t\t{tok}")
+                except ValueError as e:
+                    print("FAILED:", e)
         #print("\n".join(c.mvars.keys()))
 
 if __name__ == "__main__":
