@@ -115,8 +115,26 @@ class AMLexer(LexerBase):
         t.lexer.pop_state()
         return t
 
+class AMParser:
+    tokens = AMLexer.tokens
+
+    def build(self, **kwargs):
+        self.parser = yacc.yacc(module = self, start = 'exprs', **kwargs)
+        return self
+
+    def __call__(self, *args, **kwargs):
+        return self.parser.parse(*args, tracking=True, **kwargs)
+
+
 class AMExpr:
     _args = []
+    rules = []
+
+    def __init_subclass__(cls, *args, **kwargs):
+        super().__init_subclass__(*args, **kwargs)
+        for name, val in cls.__dict__.items():
+            if name.startswith("p_"):
+                setattr(AMParser, name, val)
 
     def __init__(self, p, argidx, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -149,14 +167,35 @@ class AMExpr:
 class AMAssign(AMExpr):
     _args = ['mode', 'var', 'value']
 
+    def p_expr_assign(self, p):
+        '''expr : NAME EQ VALUE'''
+        p[0] = AMAssign(p, [2, 1, 3])
+
 class AMConditional(AMExpr):
     _args = ['cond', 'it_true', 'it_false']
+
+    def p_expr_cond(self, p):
+        '''expr : IF VALUE exprs ENDIF
+                | IF VALUE exprs ELSE exprs ENDIF'''
+        p[0] = AMConditional(p, [2, 3, 5])
 
 class AMTarget(AMExpr):
     _args = ['target', 'deps', 'builds']
 
+    def p_expr_target(self, p):
+        '''expr : TARGET VALUE builds'''
+        p[0] = AMTarget(p, [1, 2, 3])
+
 class AMExprs(AMExpr, list):
     _args = ['_list', '_item']
+
+    def p_exprs_empty(self, p):
+        '''exprs : '''
+        p[0] = AMExprs(p, [])
+
+    def p_exprs_one(self, p):
+        '''exprs : exprs expr'''
+        p[0] = AMExprs(p, [1, 2])
 
     def __init__(self, *args, **kwargs): #items = [], append = None, **kwa):
         super().__init__(*args, **kwargs)
@@ -180,10 +219,20 @@ class AMExprs(AMExpr, list):
             item.recurse(parser)
 
 class AMBuild(AMExprs, list):
-    pass
+    def p_builds_empty(self, p):
+        '''builds : '''
+        p[0] = AMBuild(p, [])
+
+    def p_builds_build(self, p):
+        '''builds : builds BUILD'''
+        p[0] = AMBuild(p, [1, 2])
 
 class AMInclude(AMExpr, list):
     _args = ['filename']
+
+    def p_expr_incl(self, p):
+        '''expr : INCLUDE VALUE'''
+        p[0] = AMInclude(p, [2])
 
     def pretty(self):
         name = " filename='%s'" % (self.filename)
@@ -209,44 +258,6 @@ class AMInclude(AMExpr, list):
 #                '\n' if len(self) > 0 else '',
 #                ''.join(['  %s\n' % i for i in self]))
 
-
-class AMParser(object):
-    tokens = AMLexer.tokens
-
-    def p_exprs_empty(self, p):
-        '''exprs : '''
-        p[0] = AMExprs(p, [])
-    def p_exprs_one(self, p):
-        '''exprs : exprs expr'''
-        p[0] = AMExprs(p, [1, 2])
-
-    def p_expr_cond(self, p):
-        '''expr : IF VALUE exprs ENDIF
-                | IF VALUE exprs ELSE exprs ENDIF'''
-        p[0] = AMConditional(p, [2, 3, 5])
-    def p_expr_incl(self, p):
-        '''expr : INCLUDE VALUE'''
-        p[0] = AMInclude(p, [2])
-    def p_expr_assign(self, p):
-        '''expr : NAME EQ VALUE'''
-        p[0] = AMAssign(p, [2, 1, 3])
-    def p_expr_target(self, p):
-        '''expr : TARGET VALUE builds'''
-        p[0] = AMTarget(p, [1, 2, 3])
-
-    def p_builds_empty(self, p):
-        '''builds : '''
-        p[0] = AMBuild(p, [])
-    def p_builds_build(self, p):
-        '''builds : builds BUILD'''
-        p[0] = AMBuild(p, [1, 2])
-
-    def build(self, **kwargs):
-        self.parser = yacc.yacc(module = self, start = 'exprs', **kwargs)
-        return self
-
-    def __call__(self, *args, **kwargs):
-        return self.parser.parse(*args, tracking=True, **kwargs)
 
 class AMFile(AMExprs):
     lexer = AMLexer().build()
@@ -274,7 +285,9 @@ if __name__ == "__main__":
         file = AMFile(fn)
         file.load()
         file.recurse(file.parser)
-        print(file.pretty())
+        p = file.pretty()
+        print(p)
+        print(f"# lines: {p.count('\n')}")
         #with open(fn, encoding="UTF-8") as fd:
         #    data = fd.read()
 
