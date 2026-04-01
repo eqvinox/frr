@@ -4,6 +4,7 @@ project('frr', 'c',
   default_options: {
     'c_std': 'gnu23,gnu2x,gnu17,gnu11,none',
     'warning_level': '2',
+    'b_lundef': 'false',
   },
 )
 
@@ -139,13 +140,25 @@ incls = include_directories(p_incls)
 
 cc = meson.get_compiler('c')
 
-libyang = dependency('libyang', version: '>= 2.1.128')
-libjson = cc.find_library('json-c')
+headers = configuration_data()
+
+libyang = dependency('libyang', version: '>= 2.1.128', required: true)
+libjson = dependency('json-c')
+if not libjson.found()
+  libjson = cc.find_library('json-c')
+endif
+
+libcares = dependency('libcares')
+snmp = dependency('netsnmp-agent', required: get_option('snmp'))
+libunwind = dependency('libunwind', required: get_option('libunwind'))
+rtrlib = dependency('rtrlib', version: '>= 0.8.0')
+
+headers.set('HAVE_LIBUNWIND', libunwind.found())
+
 libm = cc.find_library('m')
 libcrypt = cc.find_library('crypt')
 libreadline = cc.find_library('readline')
-
-headers = configuration_data()
+libcap = cc.find_library('cap')
 
 sys_includes = ''
 sys_includes += '#define _GNU_SOURCE\n'
@@ -188,25 +201,28 @@ foreach func : sys_funcs
   headers.set(sym, cc.has_function(func, prefix: sys_includes))
 endforeach
 
-headers.set('HAVE_OPENAT', cc.has_function('openat', prefix: '#include <fcntl.h>'))
-headers.set('HAVE_UNLINKAT', cc.has_function('unlinkat', prefix: '#include <unistd.h>\n#include <fcntl.h>'))
-headers.set('HAVE_POSIX_FALLOCATE', cc.has_function('posix_fallocate', prefix: '#include <fcntl.h>'))
+headers.set('HAVE_DECL_BE32DEC', 'defined(HAVE_BE32DEC) - 0')
+headers.set('HAVE_DECL_BE32ENC', 'defined(HAVE_BE32ENC) - 0')
 
-headers.set('HAVE_POLLTS', cc.has_function('pollts', prefix: '#include <poll.h>\n#include <signal.h>\n#include<time.h>'))
-headers.set('HAVE_PPOLL', cc.has_function('ppoll', prefix: '#define _GNU_SOURCE\n#include <poll.h>'))
+headers.set('HAVE_OPENAT',                  cc.has_function('openat', prefix: '#include <fcntl.h>'))
+headers.set('HAVE_UNLINKAT',                cc.has_function('unlinkat', prefix: '#include <unistd.h>\n#include <fcntl.h>'))
+headers.set('HAVE_POSIX_FALLOCATE',         cc.has_function('posix_fallocate', prefix: '#include <fcntl.h>'))
 
-headers.set('HAVE_SENDMMSG', cc.has_function('sendmmsg', prefix: '#define _GNU_SOURCE\n#include <sys/socket.h>'))
+headers.set('HAVE_POLLTS',                  cc.has_function('pollts', prefix: '#include <poll.h>\n#include <signal.h>\n#include<time.h>'))
+headers.set('HAVE_PPOLL',                   cc.has_function('ppoll', prefix: '#define _GNU_SOURCE\n#include <poll.h>'))
 
-headers.set('HAVE_SETNS', cc.has_function('setns', prefix: '#define _GNU_SOURCE\n#include <sched.h>'))
+headers.set('HAVE_SENDMMSG',                cc.has_function('sendmmsg', prefix: '#define _GNU_SOURCE\n#include <sys/socket.h>'))
 
-headers.set('HAVE_GETGROUPLIST', cc.has_function('getgrouplist', prefix: '#include <grp.h>'))
+headers.set('HAVE_SETNS',                   cc.has_function('setns', prefix: '#define _GNU_SOURCE\n#include <sched.h>'))
 
-headers.set('HAVE_CLOCK_NANOSLEEP', cc.has_function('clock_nanosleep', prefix: '#include <time.h>'))
+headers.set('HAVE_GETGROUPLIST',            cc.has_function('getgrouplist', prefix: '#include <grp.h>'))
+
+headers.set('HAVE_CLOCK_NANOSLEEP',         cc.has_function('clock_nanosleep', prefix: '#include <time.h>'))
 headers.set('HAVE_CLOCK_THREAD_CPUTIME_ID', cc.has_header_symbol('time.h', 'CLOCK_THREAD_CPUTIME_ID'))
 
-headers.set('HAVE_EXPLICIT_BZERO', cc.has_function('explicit_bzero', prefix: '#include <string.h>'))
-headers.set('HAVE_STRLCAT', cc.has_function('strlcat', prefix: '#include <string.h>'))
-headers.set('HAVE_STRLCPY', cc.has_function('strlcpy', prefix: '#include <string.h>'))
+headers.set('HAVE_EXPLICIT_BZERO',          cc.has_function('explicit_bzero', prefix: '#include <string.h>'))
+headers.set('HAVE_STRLCAT',                 cc.has_function('strlcat', prefix: '#include <string.h>'))
+headers.set('HAVE_STRLCPY',                 cc.has_function('strlcpy', prefix: '#include <string.h>'))
 
 headers.set('HAVE_INET_ND_H',           cc.has_header('inet/nd.h'))
 headers.set('HAVE_LINUX_MROUTE6_H',     cc.has_header('linux/mroute6.h'))
@@ -273,12 +289,11 @@ headers.set('NETLINK_DEBUG', 1)
 headers.set('HAVE_BFDD', 1)
 headers.set('LINUX_IPV6', true)
 
-headers.set('HAVE_STRLCPY', true)
-headers.set('HAVE_STRLCAT', true)
-
-headers.set('HAVE_DECL_BE32DEC', 0)
-headers.set('HAVE_DECL_BE32ENC', 0)
 headers.set('HAVE_DECL_TCP_MD5SIG', 1)
+
+headers.set('DISABLE_BGP_ANNOUNCE', 0)
+
+headers.set('DEV_BUILD', get_option('dev-build'))
 
 headers.set('VTYSH', true)
 headers.set('INTERP', '"/lib64/ld-linux-x86-64.so.2"')
@@ -291,9 +306,26 @@ configure_file(
 subdir('lib')
 subdir('mgmtd')
 subdir('zebra')
+subdir('bgpd')
+subdir('bfdd')
+subdir('pimd')
+subdir('ripd')
+subdir('ripngd')
+subdir('staticd')
+subdir('watchfrr')
 
 frr_xref = custom_target('frr.xref',
-  input : [libfrr_xref, zebra_xref, mgmtd_xref],
+  input : [
+    libfrr_xref,
+    zebra_xref,
+    mgmtd_xref,
+    bfdd_xref,
+    pimd_xref,
+    pim6d_xref,
+    ripd_xref,
+    ripngd_xref,
+    staticd_xref,
+  ],
   output : ['frr.xref', 'vtysh_cmd.c'] + vtysh_split,
   command : [clippy_bin, '../python/xrelfo.py', '-Werror', '-o', '@OUTPUT0@', '@INPUT@', '-c', '@OUTPUT1@', vtysh_split],
   build_by_default: true,

@@ -1,6 +1,9 @@
-option('rundir', type: 'string', value: '/run', description: 'base directory for ephemeral FRR files')
-
+option('rundir',        type: 'string', value: '/run',    description: 'base directory for ephemeral FRR files')
 option('frrlibdir',     type: 'string', value: 'frr',     description: 'directory [rel. libdir] for FRR libraries')
 option('frrdaemondir',  type: 'string', value: 'lib/frr', description: 'directory [rel. prefix] for FRR daemons')
 option('yangmodelsdir', type: 'string', value: 'yang',    description: 'directory [rel. datadir] for YANG models')
 option('scriptdir',     type: 'string', value: 'scripts', description: 'directory [rel. sysconfdir/frr] for Lua scripts')
+
+option('dev-build',     type: 'boolean', value: false,     description: 'enable additional debug code')
+option('snmp',          type: 'feature', value: 'auto',    description: 'SNMP support')
+option('libunwind',     type: 'feature', value: 'enabled', description: 'use libunwind for backtraces')

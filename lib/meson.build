@@ -295,3 +295,47 @@ vtysh_split = []
 foreach hdr : ['1', '2', '3', '4', '5', '6', '7', '8']
   vtysh_split += 'vtysh_cmd.' + hdr + '.c'
 endforeach
+
+libfrrsnmp_sources = [
+  # lib/libfrrsnmp.la
+  'agentx.c',
+  'snmp.c',
+]
+
+libfrrsnmp = shared_library('frrsnmp',
+  sources: libfrrsnmp_sources,
+  c_args: [
+    '-DHAVE_CONFIG_H',
+    '-std=gnu11',
+  ],
+  include_directories: [
+    incls,
+  ],
+  dependencies: [
+    snmp,
+    libyang,
+    libjson,
+  ],
+  version: '0.0.0'
+)
+
+libfrrcares_sources = [
+  # lib/libfrrcares.la
+  'resolver.c',
+]
+
+libfrrcares = shared_library('frrcares',
+  sources: libfrrcares_sources,
+  c_args: [
+    '-DHAVE_CONFIG_H',
+  ],
+  include_directories: [
+    incls,
+  ],
+  dependencies: [
+    libyang,
+    libjson,
+    libcares,
+  ],
+  version: '0.0.0'
+)
