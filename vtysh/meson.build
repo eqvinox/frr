@@ -18,12 +18,5 @@ vtysh_bin = executable('vtysh',
   dependencies : [
     libreadline,
   ],
+  build_by_default: false,
 )
-
-mgmtd_bin_wrap = custom_target('mgmtd_bin_wrap',
-  output: ['mgmtd.dep'],
-  input: [mgmtd_bin],
-  command: ['ln', '-sf', '@PLAINNAME@', '@OUTPUT@'],
-)
-mgmtd_xref = xrelfo.process(mgmtd_bin_wrap)
-

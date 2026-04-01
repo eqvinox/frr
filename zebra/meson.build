@@ -95,6 +95,9 @@ zebra_bin = executable('zebra',
     libyang,
     libjson,
   ],
+  install: true,
+  install_dir: frrdaemondir,
+  install_rpath: frrlibdir,
 )
 
 zebra_bin_wrap = custom_target('zebra_bin_wrap',

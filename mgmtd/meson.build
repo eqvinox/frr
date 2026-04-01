@@ -33,6 +33,10 @@ libmgmt_be_nb = library('mgmt_be_nb',
   dependencies : [
     libyang,
   ],
+  soversion: '10_7_0',
+  install: true,
+  install_dir: frrlibdir,
+  install_rpath: frrlibdir,
 )
 
 mgmtd_bin = executable('mgmtd',
@@ -47,6 +51,9 @@ mgmtd_bin = executable('mgmtd',
     libyang,
     libjson,
   ],
+  install: true,
+  install_dir: frrdaemondir,
+  install_rpath: frrlibdir,
 )
 
 mgmtd_bin_wrap = custom_target('mgmtd_bin_wrap',

@@ -72,11 +72,13 @@ clippy_sources = [
   'vector.c',
 ]
 
+#py3dep = py3.dependency(embed : true)
+py3dep = dependency('python3-embed', native: true)
 clippy_bin = executable('clippy',
   sources : clippy_sources, 
   include_directories : incls_noassert,
   native : true,
-  dependencies : [py3.dependency(embed : true), libelf],
+  dependencies : [py3dep, libelf],
   c_args : '-DBUILDING_CLIPPY',
 )
 
@@ -256,7 +258,6 @@ libfrr_sources = [
 	yang_embed.process('../yang/ietf/ietf-bgp-types.yang'),
 	yang_embed.process('../yang/frr-module-translator.yang'),
 	yang_embed.process('../yang/ietf/ietf-srv6-types.yang'),
-
 ]
 
 libfrr = shared_library('frr',
@@ -270,6 +271,11 @@ libfrr = shared_library('frr',
     libm,
     libcrypt,
   ],
+  #link_args: ['-Xlinker', '-e_libfrr_version'],
+  link_args: ['-Xlinker', '-e_libfrr_start', '../crt_frr.o'],
+  soversion: '10_7_0',
+  install: true,
+  install_dir: frrlibdir,
 )
 
 xrelfo = generator(clippy_bin,

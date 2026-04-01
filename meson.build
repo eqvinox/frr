@@ -1,6 +1,10 @@
 project('frr', 'c',
   version: '10.7.0-dev',
   meson_version: '>= 1.10.0',
+  default_options: {
+    'c_std': 'gnu23,gnu2x,gnu17,gnu11,none',
+    'warning_level': '2',
+  },
 )
 
 pkg_specs = configuration_data()
@@ -30,12 +34,12 @@ configure_file(input: 'lib/version.h.in',      build_subdir: 'generated/lib', ou
 configure_file(input: 'lib/config_paths.h.in', build_subdir: 'generated/lib', output: 'config_paths.h', configuration: pkg_specs)
 
 add_project_arguments(
-  '-std=gnu23',
+  # '-std=gnu23',
   '-fms-extensions',
   '-fno-omit-frame-pointer',
   '-funwind-tables',
-  '-Wall',
-  '-Wextra',
+  #  '-Wall',
+  #  '-Wextra',
   '-Wformat-nonliteral',
   '-Wformat-security',
   '-Wswitch-enum',
@@ -55,12 +59,12 @@ add_project_arguments(
 )
 
 add_project_arguments(
-  '-std=gnu23',
+  # '-std=gnu23',
   '-fms-extensions',
   '-fno-omit-frame-pointer',
   '-funwind-tables',
-  '-Wall',
-  '-Wextra',
+  # '-Wall',
+  # '-Wextra',
   '-Wformat-nonliteral',
   '-Wformat-security',
   '-Wswitch-enum',
@@ -277,6 +281,7 @@ headers.set('HAVE_DECL_BE32ENC', 0)
 headers.set('HAVE_DECL_TCP_MD5SIG', 1)
 
 headers.set('VTYSH', true)
+headers.set('INTERP', '"/lib64/ld-linux-x86-64.so.2"')
 
 configure_file(
   output: 'config.h',
@@ -288,7 +293,7 @@ subdir('mgmtd')
 subdir('zebra')
 
 frr_xref = custom_target('frr.xref',
-  input : [libfrr_xref, zebra_xref],
+  input : [libfrr_xref, zebra_xref, mgmtd_xref],
   output : ['frr.xref', 'vtysh_cmd.c'] + vtysh_split,
   command : [clippy_bin, '../python/xrelfo.py', '-Werror', '-o', '@OUTPUT0@', '@INPUT@', '-c', '@OUTPUT1@', vtysh_split],
   build_by_default: true,
