@@ -640,20 +640,61 @@ def display_source(c, basepath, src):
         return "clippy.process('" + relsrc + "')"
     return "'" + relsrc + "'"
 
+class CondNotMapped(KeyError):
+    pass
+
+def getconddeps(conds):
+    deps = []
+    res = CondStack()
+    for cond, arc in conds:
+        if arc and cond.cond in conddeps:
+            deps.append(conddeps[cond.cond])
+            continue
+        res.append((cond, arc))
+
+    return deps, res
+
+def getcond(conds):
+    res = []
+    for cond, arc in conds:
+        if cond.cond not in condmap:
+            raise CondNotMapped(cond.cond)
+        if condmap[cond.cond] == "true" and arc:
+            continue
+        res.append(("" if arc else "not ") + condmap[cond.cond])
+
+    return " and ".join(res) if res else "true"
+
 def emit_source_list(c, stream, name, items, basepath=".", comment=""):
     stream.write(f"{name}_sources = [{comment}\n")
+    conduniq = {}
     for source, conds in items:
         if conds:
-            stream.write(f"  #{source} {conds.short()} -- FIXME!\n")
+            cond = conduniq.setdefault(conds.short(), (conds, []))
+            cond[1].append(source)
             continue
         if isinstance(source, str):
-            stream.write("  " + display_source(c, basepath, source) + ",\n")
+            stream.write("    " + display_source(c, basepath, source) + ",\n")
         elif len(source) == 1 and source[0].type == "MAKEVAR":
-            stream.write("  " + source[0].value.lower() + "_sources,\n")
+            stream.write("    " + source[0].value.lower() + "_sources,\n")
         else:
             stream.write(f"  #{source} -- FIXME!\n")
-    stream.write("]\n\n")
-
+    stream.write("]\n")
+    for conds, srcs in conduniq.values():
+        try:
+            condexpr = getcond(conds)
+            stream.write(f"if {condexpr}\n  {name}_sources += [\n")
+            for source in srcs:
+                if isinstance(source, str):
+                    stream.write("    " + display_source(c, basepath, source) + ",\n")
+                elif len(source) == 1 and source[0].type == "MAKEVAR":
+                    stream.write("    " + source[0].value.lower() + "_sources,\n")
+                else:
+                    stream.write(f"  #{source} -- FIXME!\n")
+            stream.write("  ]\nendif\n")
+        except CondNotMapped:
+            stream.write(f"  #{source} {conds.short()} -- FIXME!\n")
+    stream.write("\n")
 
 deps = {
     "${LIBCAP}": "libcap",
@@ -802,6 +843,24 @@ class ATCommon(ATCompiledBase):
             else:
                 breakpoint()
 
+        cdeps, conds = getconddeps(self.conds)
+        try:
+            condexpr = getcond(conds)
+        except CondNotMapped:
+            condexpr = "true"
+            stream.write(f"# FIXME: conds: {conds.short()}\n")
+            stream.write(f"# FIXME: all conds: {self.conds.short()}\n")
+        for depv in cdeps:
+            if not isinstance(depv, tuple):
+                depv = (depv,)
+            for dep in depv:
+                if dep in args["dependencies"] or dep in args.get("link_with", []):
+                    break
+            else:
+                args["dependencies"].append(f"{depv[0]}, # FIXME")
+
+        if condexpr != "true":
+            stream.write(f"if {condexpr}\n")
         stream.write(f"""{varname} = {func}('{name}',
   sources: {varname.removesuffix('_bin')}_sources,
 """)
@@ -816,7 +875,10 @@ class ATCommon(ATCompiledBase):
             else:
                 stream.write(str(vals) + "\n")
 
-        stream.write(")\n\n")
+        stream.write(")\n")
+        if condexpr != "true":
+            stream.write(f"endif # {condexpr}\n")
+        stream.write("\n")
         return stream
 
 class ATProgram(ATCommon):
@@ -853,6 +915,18 @@ class ATLibtoolLibrary(ATCommon):
         varname = os.path.basename(self.name).split(".")[0]
         super().emit(c, streams, "shared_library", varname)
 
+condmap = {
+    "NETLINK_DEBUG": "get_option('netlink-debug')",
+    "DEV_BUILD": "get_option('dev-build')",
+    "LINUX": "host_machine.system() == 'linux'",
+    "ZEBRA": "true",
+    "FPM": "get_option('fpm')",
+    "HAVE_PROTOBUF": "protobuf",
+}
+conddeps = {
+    "SNMP": ("snmp", "libfrrsnmp"),
+    "DP_DPDK": "libdpdk",
+}
 mainkeys = {
     "PROGRAMS": ATProgram,
     "SCRIPTS": ATOther,
@@ -1104,7 +1178,7 @@ if __name__ == "__main__":
         streams: dict[str, io.StringIO] = defaultdict()
         streams.default_factory = io.StringIO
 
-        streams["lib"] = sys.stdout
+        #streams["zebra"] = sys.stdout
         for slist in c.source_lists:
             srcs = list(_flatten_var(c.mvars, c.mvars[slist]))
             path = os.path.dirname(srcs[0][0])
@@ -1115,7 +1189,7 @@ if __name__ == "__main__":
             for target in targets:
                 target.emit(c, streams)
 
-        for i in ["bfdd", "pimd", "ripd", "ripngd", "staticd", "watchfrr", "bgpd"]:
+        for i in ["zebra", "bfdd", "pimd", "ripd", "ripngd", "staticd", "watchfrr", "bgpd"]:
             with open(f"{i}/meson.build", "w") as fd:
                 fd.write(streams[i].getvalue())
 
