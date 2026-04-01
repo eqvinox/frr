@@ -4,6 +4,14 @@ option('frrdaemondir',  type: 'string', value: 'lib/frr', description: 'director
 option('yangmodelsdir', type: 'string', value: 'yang',    description: 'directory [rel. datadir] for YANG models')
 option('scriptdir',     type: 'string', value: 'scripts', description: 'directory [rel. sysconfdir/frr] for Lua scripts')
 
-option('dev-build',     type: 'boolean', value: false,     description: 'enable additional debug code')
-option('snmp',          type: 'feature', value: 'auto',    description: 'SNMP support')
-option('libunwind',     type: 'feature', value: 'enabled', description: 'use libunwind for backtraces')
+option('multipath',     type: 'integer', value: 64,       description: 'hard limit of ECMP/UCMP paths supported')
+option('defaults',      type: 'combo', choices: ['traditional', 'datacenter'],
+                                                          description: 'default set of configuration parameters to use')
+
+option('snmp',          type: 'feature', value: 'auto',     description: 'SNMP support')
+option('rpki',          type: 'feature', value: 'auto',     description: 'RPKI support (using RTRLIB)')
+option('libunwind',     type: 'feature', value: 'enabled',  description: 'use libunwind for backtraces')
+option('dp-dpdk',       type: 'feature', value: 'disabled', description: 'build DPDK dataplane module')
+option('fpm',           type: 'boolean', value: false,      description: 'enable FPM (Forwarding Plane Manager) interface')
+option('dev-build',     type: 'boolean', value: false,      description: 'enable additional debug code')
+option('netlink-debug', type: 'boolean', value: false,      description: 'enable extra netlink debug messages')

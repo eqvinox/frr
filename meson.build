@@ -85,6 +85,17 @@ add_project_arguments(
   native : true,
 )
 
+add_project_arguments('-DHAVE_CONFIG_H', language: 'c')
+add_project_arguments('-DHAVE_CONFIG_H', language: 'cpp')
+if get_option('dev-build')
+  today = run_command('date', '+%Y%m%d', check: true).stdout().strip()
+  add_project_arguments('-DCONFDATE=' + today, language: 'c')
+  add_project_arguments('-DCONFDATE=' + today, language: 'cpp')
+else
+  add_project_arguments('-DCONFDATE=0', language: 'c')
+  add_project_arguments('-DCONFDATE=0', language: 'cpp')
+endif
+
 rt_enabled = []
 rt_enabled += ['--enabled', 'babeld']
 rt_enabled += ['--enabled', 'bfdd']
@@ -143,22 +154,25 @@ cc = meson.get_compiler('c')
 headers = configuration_data()
 
 libyang = dependency('libyang', version: '>= 2.1.128', required: true)
-libjson = dependency('json-c')
-if not libjson.found()
-  libjson = cc.find_library('json-c')
-endif
+libjson = dependency('json-c', 'json',                required: true)
+#if not libjson.found()
+#  libjson = cc.find_library('json-c')
+#endif
 
-libcares = dependency('libcares')
-snmp = dependency('netsnmp-agent', required: get_option('snmp'))
-libunwind = dependency('libunwind', required: get_option('libunwind'))
-rtrlib = dependency('rtrlib', version: '>= 0.8.0')
-
+libunwind = dependency('libunwind',                   required: get_option('libunwind'))
 headers.set('HAVE_LIBUNWIND', libunwind.found())
+
+libcares = dependency('libcares',                     disabler: true)
+snmp =     dependency('netsnmp-agent',                disabler: true, required: get_option('snmp'))
+rtrlib =   dependency('rtrlib', version: '>= 0.8.0',  disabler: true, required: get_option('rpki'))
+libdpdk =  dependency('libdpdk',                      disabler: true, required: get_option('dp-dpdk'))
 
 libm = cc.find_library('m')
 libcrypt = cc.find_library('crypt')
 libreadline = cc.find_library('readline')
 libcap = cc.find_library('cap')
+
+protobuf = false
 
 sys_includes = ''
 sys_includes += '#define _GNU_SOURCE\n'
@@ -201,8 +215,8 @@ foreach func : sys_funcs
   headers.set(sym, cc.has_function(func, prefix: sys_includes))
 endforeach
 
-headers.set('HAVE_DECL_BE32DEC', 'defined(HAVE_BE32DEC) - 0')
-headers.set('HAVE_DECL_BE32ENC', 'defined(HAVE_BE32ENC) - 0')
+headers.set('HAVE_DECL_BE32DEC', '(!!defined(HAVE_BE32DEC) - 0)')
+headers.set('HAVE_DECL_BE32ENC', '(!!defined(HAVE_BE32ENC) - 0)')
 
 headers.set('HAVE_OPENAT',                  cc.has_function('openat', prefix: '#include <fcntl.h>'))
 headers.set('HAVE_UNLINKAT',                cc.has_function('unlinkat', prefix: '#include <unistd.h>\n#include <fcntl.h>'))
@@ -265,38 +279,48 @@ headers.set('HAVE_STRUCT_ND_OPT_DNSSL',                       cc.has_member('str
 headers.set('HAVE_STRUCT_ND_OPT_HOMEAGENT_INFO',              cc.has_member('struct nd_opt_homeagent_info', 'nd_opt_hai_type',          prefix: '#include <netinet/icmp6.h>'))
 headers.set('HAVE_STRUCT_ND_OPT_RDNSS',                       cc.has_member('struct nd_opt_rdnss',          'nd_opt_rdnss_type',        prefix: '#include <netinet/icmp6.h>'))
 
-#	HAVE_IP_FREEBIND
-#	HAVE_IP_PKTINFO
-#	HAVE_IP_RECVDSTADDR
-#	HAVE_IP_RECVIF
-#	HAVE_SO_BINDANY
-#	IPV6_MINHOPCOUNT
+headers.set('HAVE_IP_PKTINFO',      cc.has_header_symbol('netdb.h', 'IP_PKTINFO'))
+headers.set('HAVE_IP_RECVDSTADDR',  cc.has_header_symbol('netinet/in.h', 'IP_RECVDSTADDR'))
+headers.set('HAVE_IP_RECVIF',       cc.has_header_symbol('netinet/in.h', 'IP_RECVDSTADDR'))
+headers.set('HAVE_IP_FREEBIND',     cc.has_header_symbol('netinet/in.h', 'IP_FREEBIND'))
+headers.set('HAVE_SO_BINDANY',      cc.has_header_symbol('sys/socket.h', 'SO_BINDANY'))
+
+headers.set('HAVE_DECL_TCP_MD5SIG', 1)
+
+if host_machine.system() == 'linux'
+  headers.set('GNU_LINUX',    1)
+  headers.set('HAVE_NETLINK', 1)
+  headers.set('LINUX_IPV6',   1)
+  headers.set('IPV6_MINHOPCOUNT', 73)
+endif
+headers.set('NETLINK_DEBUG', get_option('netlink-debug'))
 
 headers.set('HAVE_OPENPAM_H',           cc.has_header('openpam.h'))
 headers.set('HAVE_PAM_MISC_H',          cc.has_header('pam_misc.h'))
 
-headers.set('HAVE_SECTION_SYMS', true)
 headers.set('_GNU_SOURCE', true)
+headers.set('HAVE_SECTION_SYMS', true)
 
-headers.set('MULTIPATH_NUM', 64)
-headers.set('CONFIGFILE_MASK', 0o640)
-headers.set('LOGFILE_MASK', 0o640)
-headers.set('DFLT_NAME', '"traditional"')
-headers.set('LOG_TIMESTAMP_PRECISION', 6)
-headers.set('GNU_LINUX', true)
-headers.set('HAVE_NETLINK', true)
-headers.set('NETLINK_DEBUG', 1)
+headers.set('MULTIPATH_NUM',            get_option('multipath'))
+headers.set_quoted('DFLT_NAME',         get_option('defaults'))
+
+headers.set('CONFIGFILE_MASK',          0o640)
+headers.set('LOGFILE_MASK',             0o640)
+headers.set('LOG_TIMESTAMP_PRECISION',  6)
+
 headers.set('HAVE_BFDD', 1)
-headers.set('LINUX_IPV6', true)
-
-headers.set('HAVE_DECL_TCP_MD5SIG', 1)
 
 headers.set('DISABLE_BGP_ANNOUNCE', 0)
 
 headers.set('DEV_BUILD', get_option('dev-build'))
 
 headers.set('VTYSH', true)
-headers.set('INTERP', '"/lib64/ld-linux-x86-64.so.2"')
+
+objcopy = find_program('objcopy')
+get_interp = run_command('/bin/sh', files('tools/get_interp.sh'), cc.cmd_array(), env: { 'OBJCOPY': ' '.join(objcopy.cmd_array()) }, check: false)
+if get_interp.returncode() == 0
+  headers.set_quoted('INTERP', get_interp.stdout().strip())
+endif
 
 configure_file(
   output: 'config.h',
