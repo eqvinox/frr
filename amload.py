@@ -513,7 +513,7 @@ class ATarget:
     def dump(self):
         print(repr(self))
 
-    def emit(self, c, stream):
+    def emit(self, c, streams):
         pass
 
 class ATOther(ATarget):
@@ -624,9 +624,10 @@ class ATCompiledBase(ATarget):
             #    continue
         print("")
 
-    def emit(self, c, stream):
-        super().emit(c, stream)
+    def emit(self, c, streams):
+        super().emit(c, streams)
         basepath = os.path.dirname(self.name)
+        stream = streams[basepath]
 
         name = re_canon.sub("_", os.path.basename(self.name))
         emit_source_list(c, stream, name, self.sources, basepath, f"\n  # {self.name}")
@@ -634,7 +635,7 @@ class ATCompiledBase(ATarget):
 def display_source(c, basepath, src):
     relsrc = os.path.relpath(src, basepath)
     if src.endswith(".yang.c"):
-        return "yang_embed.process('" + src.removesuffix(".c") + "')"
+        return "yang_embed.process('" + relsrc.removesuffix(".c") + "')"
     if src in c.clippy_scan:
         return "clippy.process('" + relsrc + "')"
     return "'" + relsrc + "'"
@@ -648,7 +649,7 @@ def emit_source_list(c, stream, name, items, basepath=".", comment=""):
         if isinstance(source, str):
             stream.write("  " + display_source(c, basepath, source) + ",\n")
         elif len(source) == 1 and source[0].type == "MAKEVAR":
-            stream.write("  " + source[0].value.lower() + ",\n")
+            stream.write("  " + source[0].value.lower() + "_sources,\n")
         else:
             stream.write(f"  #{source} -- FIXME!\n")
     stream.write("]\n\n")
@@ -659,7 +660,7 @@ deps = {
     "${LIBREADLINE}": "libreadline",
     "${LIBPAM}": "libpam",
     "${LIBYANG_LIBS}": "libyang",
-    "${UST_LIBS}": "tracing",
+    "${UST_LIBS}": None, #"tracing",
     "${LIBM}": "libm",
     "-lm": "libm",
     "-lpthread": None,
@@ -667,19 +668,24 @@ deps = {
 }
 
 class ATProgram(ATCompiledBase):
-    def emit(self, c, stream):
-        return
+    def emit(self, c, streams, meep="executable", opn=None):
         if self.name == "tools/frr-llvm-cg" or self.name.startswith("tests/") or self.name == "lib/clippy":
             return
-        super().emit(c, stream)
+        super().emit(c, streams)
 
         basepath = os.path.dirname(self.name)
         name = re_canon.sub("_", os.path.basename(self.name))
+        stream = streams[basepath]
 
-        stream.write(f"""{name}_bin = executable('{name}',
+        opn = opn or name + "_bin"
+        stream.write(f"""{opn} = {meep}('{name}',
   sources: {name}_sources,
 """)
-        args = {}
+        args = {
+            "c_args": ["'-DHAVE_CONFIG_H'"],
+            "include_directories": ["incls"],
+            "dependencies": ["libyang", "libjson"]
+        }
         for flag, vals in self.flags.items():
             if not vals:
                 continue
@@ -740,14 +746,14 @@ class ATProgram(ATCompiledBase):
 
         stream.write(")\n\n")
 
-class ATLibrary(ATCompiledBase):
-    def emit(self, c, stream):
-        super().emit(c, stream)
-
+class ATLibrary(ATProgram): #CompiledBase):
+    def emit(self, c, streams):
         basepath = os.path.dirname(self.name)
         name = re_canon.sub("_", os.path.basename(self.name))
 
-        stream.write(f"""#{name}_a = library()\n\n""")
+        stream = streams[basepath]
+        stream.write(f"""#{name}_a = library() >>\n""")
+        super().emit(c, streams, "static_library", opn=os.path.basename(self.name).split(".")[0])
 
 class ATLibtoolLibrary(ATCompiledBase):
     pass
@@ -998,13 +1004,24 @@ if __name__ == "__main__":
 
         c.clippy_scan = [i[0] for i in _flatten_var(c.mvars, c.mvars["clippy_scan"])]
 
-        for slist in c.source_lists:
-            srcs = _flatten_var(c.mvars, c.mvars[slist])
-            emit_source_list(c, sys.stdout, slist.lower(), srcs)
+        from collections import defaultdict
+        import io
+        streams: dict[str, io.StringIO] = defaultdict()
+        streams.default_factory = io.StringIO
 
-        for mode, targets in c.am_items.items():
+        for slist in c.source_lists:
+            srcs = list(_flatten_var(c.mvars, c.mvars[slist]))
+            path = os.path.dirname(srcs[0][0])
+            emit_source_list(c, streams[path], slist.lower(), srcs, path)
+
+        for mode in ["LIBRARIES", "LTLIBRARIES", "PROGRAMS"]:
+            targets = c.am_items[mode]
             for target in targets:
-                target.emit(c, sys.stdout)
+                target.emit(c, streams)
+
+        for i in ["bfdd", "pimd"]:
+            with open(f"{i}/meson.build", "w") as fd:
+                fd.write(streams[i].getvalue())
 
         #print("\n".join(c.mvars.keys()))
 
