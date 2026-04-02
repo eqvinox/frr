@@ -2,9 +2,10 @@ project('frr', 'c',
   version: '10.7.0-dev',
   meson_version: '>= 1.10.0',
   default_options: {
-    'c_std': 'gnu23,gnu2x,gnu17,gnu11,none',
-    'warning_level': '2',
     'b_lundef': 'false',
+    'c_std': 'gnu23,gnu2x,gnu17,gnu11,none',
+    'buildtype': 'debugoptimized',
+    'warning_level': '2',
   },
 )
 
@@ -215,8 +216,8 @@ foreach func : sys_funcs
   headers.set(sym, cc.has_function(func, prefix: sys_includes))
 endforeach
 
-headers.set('HAVE_DECL_BE32DEC', '(!!defined(HAVE_BE32DEC) - 0)')
-headers.set('HAVE_DECL_BE32ENC', '(!!defined(HAVE_BE32ENC) - 0)')
+headers.set10('HAVE_DECL_BE32DEC', cc.has_function('be32dec', prefix: sys_includes))
+headers.set10('HAVE_DECL_BE32ENC', cc.has_function('be32enc', prefix: sys_includes))
 
 headers.set('HAVE_OPENAT',                  cc.has_function('openat', prefix: '#include <fcntl.h>'))
 headers.set('HAVE_UNLINKAT',                cc.has_function('unlinkat', prefix: '#include <unistd.h>\n#include <fcntl.h>'))
@@ -281,7 +282,7 @@ headers.set('HAVE_STRUCT_ND_OPT_RDNSS',                       cc.has_member('str
 
 headers.set('HAVE_IP_PKTINFO',      cc.has_header_symbol('netdb.h', 'IP_PKTINFO'))
 headers.set('HAVE_IP_RECVDSTADDR',  cc.has_header_symbol('netinet/in.h', 'IP_RECVDSTADDR'))
-headers.set('HAVE_IP_RECVIF',       cc.has_header_symbol('netinet/in.h', 'IP_RECVDSTADDR'))
+headers.set('HAVE_IP_RECVIF',       cc.has_header_symbol('netinet/in.h', 'IP_RECVIF'))
 headers.set('HAVE_IP_FREEBIND',     cc.has_header_symbol('netinet/in.h', 'IP_FREEBIND'))
 headers.set('HAVE_SO_BINDANY',      cc.has_header_symbol('sys/socket.h', 'SO_BINDANY'))
 
@@ -310,7 +311,17 @@ headers.set('LOG_TIMESTAMP_PRECISION',  6)
 
 headers.set('HAVE_BFDD', 1)
 
+headers.set('CRYPTO_OPENSSL', 1)
+add_project_link_arguments('-lcrypto', language: 'c')
+
 headers.set('DISABLE_BGP_ANNOUNCE', 0)
+
+headers.set('ISIS_METHOD_PFPACKET', 1)
+headers.set('ISIS_METHOD_BPF', 2)
+headers.set('ISIS_METHOD_DLPI', 3)
+headers.set('ISIS_METHOD', 'ISIS_METHOD_PFPACKET')
+
+headers.set_quoted('VICI_SOCKET', '/foo')
 
 headers.set('DEV_BUILD', get_option('dev-build'))
 
@@ -327,7 +338,9 @@ configure_file(
   configuration: headers,
 )
 
+xrefs = []
 subdir('lib')
+xrefs += [ libfrr_xref ]
 subdir('mgmtd')
 subdir('zebra')
 subdir('bgpd')
@@ -336,20 +349,29 @@ subdir('pimd')
 subdir('ripd')
 subdir('ripngd')
 subdir('staticd')
+subdir('isisd')
+subdir('vrrpd')
+subdir('nhrpd')
+subdir('sharpd')
+subdir('ldpd')
+subdir('babeld')
+subdir('eigrpd')
+subdir('ospfd')
+subdir('ospf6d')
+subdir('ospfclient')
+subdir('pbrd')
+subdir('fpm')
+subdir('pceplib')
+subdir('pathd')
 subdir('watchfrr')
 
+vtysh_split = []
+foreach hdr : ['1', '2', '3', '4', '5', '6', '7', '8']
+  vtysh_split += 'vtysh_cmd.' + hdr + '.c'
+endforeach
+
 frr_xref = custom_target('frr.xref',
-  input : [
-    libfrr_xref,
-    zebra_xref,
-    mgmtd_xref,
-    bfdd_xref,
-    pimd_xref,
-    pim6d_xref,
-    ripd_xref,
-    ripngd_xref,
-    staticd_xref,
-  ],
+  input: xrefs,
   output : ['frr.xref', 'vtysh_cmd.c'] + vtysh_split,
   command : [clippy_bin, '../python/xrelfo.py', '-Werror', '-o', '@OUTPUT0@', '@INPUT@', '-c', '@OUTPUT1@', vtysh_split],
   build_by_default: true,

@@ -18,5 +18,4 @@ vtysh_bin = executable('vtysh',
   dependencies : [
     libreadline,
   ],
-  build_by_default: false,
 )

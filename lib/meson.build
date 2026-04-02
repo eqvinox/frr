@@ -291,11 +291,6 @@ libfrr_wrap = custom_target('libfrr_wrap',
 )
 libfrr_xref = xrelfo.process(libfrr_wrap)
 
-vtysh_split = []
-foreach hdr : ['1', '2', '3', '4', '5', '6', '7', '8']
-  vtysh_split += 'vtysh_cmd.' + hdr + '.c'
-endforeach
-
 libfrrsnmp_sources = [
   # lib/libfrrsnmp.la
   'agentx.c',

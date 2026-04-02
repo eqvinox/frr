@@ -236,7 +236,7 @@ class XrefLogmsg(ELFDissectStruct, XrelfoJson):
         jsobj["args"] = self.args
         jsobj["priority"] = self.priority & 7
         jsobj["type"] = "logmsg"
-        jsobj["binary"] = self._elfsect._elfwrap.orig_filename
+        jsobj["binary"] = self._elfsect._elfwrap.orig_filename.removesuffix(".dep")
 
         if self.priority & 0x10:
             jsobj.setdefault("flags", []).append("errno")
@@ -259,7 +259,7 @@ class CmdElement(ELFDissectStruct, XrelfoJson):
         jsobj = (
             xrelfo["cli"]
             .setdefault(self.name, {})
-            .setdefault(self._elfsect._elfwrap.orig_filename, {})
+            .setdefault(self._elfsect._elfwrap.orig_filename.removesuffix(".dep"), {})
         )
 
         jsobj.update(
@@ -291,7 +291,7 @@ class XrefInstallElement(ELFDissectStruct, XrelfoJson):
         jsobj = (
             xrelfo["cli"]
             .setdefault(self.cmd_element.name, {})
-            .setdefault(self._elfsect._elfwrap.orig_filename, {})
+            .setdefault(self._elfsect._elfwrap.orig_filename.removesuffix(".dep"), {})
         )
         nodes = jsobj.setdefault("nodes", [])
 

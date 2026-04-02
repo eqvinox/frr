@@ -634,7 +634,7 @@ static int isis_vty_lsp_mtu_set(struct vty *vty, unsigned int lsp_mtu)
 
 DEFUN (area_lsp_mtu,
        area_lsp_mtu_cmd,
-       "lsp-mtu (128-4352)",
+       "lsp-mtu (128-4352)$val",
        "Configure the maximum size of generated LSPs\n"
        "Maximum size of generated LSPs\n")
 {

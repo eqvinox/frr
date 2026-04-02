@@ -722,7 +722,7 @@ deps = {
 }
 
 class ATCommon(ATCompiledBase):
-    def emit(self, c, streams, func, varname):
+    def emit(self, c, streams, func, varname, xref=False):
         super().emit(c, streams)
 
         basepath = os.path.dirname(self.name)
@@ -734,6 +734,7 @@ class ATCommon(ATCompiledBase):
             "include_directories": ["incls"],
             "dependencies": ["libyang", "libjson"]
         }
+        module = False
         for flag, vals in self.flags.items():
             if not vals:
                 continue
@@ -783,7 +784,7 @@ class ATCommon(ATCompiledBase):
                         ]:
                         continue
                     elif val in ["-fPIC"]:
-                        args["pic"] = 'true',
+                        pass #args["pic"] = 'true'
                     elif isinstance(val, str) and (val.startswith("-D") or val.startswith("-std")):
                         args.setdefault(dst + "_args", []).append("'" + val + "'")
                     elif isinstance(val, str) and val.startswith("-I"):
@@ -817,6 +818,8 @@ class ATCommon(ATCompiledBase):
                     elif val == "-shared":
                         pass
                     elif val == "-module":
+                        module = True
+                        args["name_prefix"] = "''"
                         func = "shared_module"
                         if "soversion" in args:
                             del args["soversion"]
@@ -843,6 +846,11 @@ class ATCommon(ATCompiledBase):
             else:
                 breakpoint()
 
+        if func == "executable":
+            args["export_dynamic"] = 'true'
+        if not (xref and not module and 'mgmt_' not in name):
+            args["build_by_default"] = 'true'
+
         cdeps, conds = getconddeps(self.conds)
         try:
             condexpr = getcond(conds)
@@ -859,6 +867,8 @@ class ATCommon(ATCompiledBase):
             else:
                 args["dependencies"].append(f"{depv[0]}, # FIXME")
 
+        if name == "ospfclient":
+            args["link_with"].append("libfrr")
         if condexpr != "true":
             stream.write(f"if {condexpr}\n")
         stream.write(f"""{varname} = {func}('{name}',
@@ -873,9 +883,21 @@ class ATCommon(ATCompiledBase):
                     stream.write(f"    {arg},\n")
                 stream.write("  ],\n")
             else:
-                stream.write(str(vals) + "\n")
+                stream.write(str(vals) + ",\n")
 
         stream.write(")\n")
+
+        if xref and not module and 'mgmt_' not in name:
+            sys.stderr.write(f"{basepath}  xref {name} ({self.dirvar})\n")
+            stream.write(f"""{varname}_wrap = custom_target('{varname}_wrap',
+  output: ['{name}.dep'],
+  input: [{varname}],
+  command: ['ln', '-sf', '@PLAINNAME@', '@OUTPUT@'],
+)
+{name}_xref = xrelfo.process({varname}_wrap)
+xrefs += [ {name}_xref ]
+""")
+
         if condexpr != "true":
             stream.write(f"endif # {condexpr}\n")
         stream.write("\n")
@@ -890,14 +912,7 @@ class ATProgram(ATCommon):
         name = re_canon.sub("_", os.path.basename(self.name))
 
         varname = name + "_bin"
-        stream = super().emit(c, streams, "executable", varname)
-        stream.write(f"""{varname}_wrap = custom_target('{varname}_wrap',
-  output: ['{name}.dep'],
-  input: [{varname}],
-  command: ['ln', '-sf', '@PLAINNAME@', '@OUTPUT@'],
-)
-{name}_xref = xrelfo.process({varname}_wrap)
-""")
+        stream = super().emit(c, streams, "executable", varname, xref=self.dirvar not in [None, 'bin'])
 
 class ATLibrary(ATCommon): #CompiledBase):
     def emit(self, c, streams):
@@ -905,7 +920,8 @@ class ATLibrary(ATCommon): #CompiledBase):
         name = re_canon.sub("_", os.path.basename(self.name))
 
         varname = os.path.basename(self.name).split(".")[0]
-        super().emit(c, streams, "static_library", varname)
+        stream = super().emit(c, streams, "static_library", varname)
+
 
 class ATLibtoolLibrary(ATCommon):
     def emit(self, c, streams):
@@ -913,15 +929,25 @@ class ATLibtoolLibrary(ATCommon):
         name = re_canon.sub("_", os.path.basename(self.name)).removeprefix("lib")
 
         varname = os.path.basename(self.name).split(".")[0]
-        super().emit(c, streams, "shared_library", varname)
+        stream = super().emit(c, streams, "shared_library", varname, xref=True)
+
 
 condmap = {
     "NETLINK_DEBUG": "get_option('netlink-debug')",
     "DEV_BUILD": "get_option('dev-build')",
     "LINUX": "host_machine.system() == 'linux'",
-    "ZEBRA": "true",
     "FPM": "get_option('fpm')",
     "HAVE_PROTOBUF": "protobuf",
+
+    "ZEBRA": "true",
+    "STATICD": "true",
+    "RIPD": "true",
+    "RIPNGD": "true",
+    "PATHD": "true",
+
+    "PATHD_PCEP": "true",
+    "PATHD_PCEP_TEST": "false",
+    "false": "false",
 }
 conddeps = {
     "SNMP": ("snmp", "libfrrsnmp"),
@@ -1189,9 +1215,15 @@ if __name__ == "__main__":
             for target in targets:
                 target.emit(c, streams)
 
-        for i in ["zebra", "bfdd", "pimd", "ripd", "ripngd", "staticd", "watchfrr", "bgpd"]:
+        for i in [
+                "zebra", "bfdd", "pimd", "ripd", "ripngd", "staticd", "watchfrr", "bgpd",
+                "isisd", "vrrpd", "nhrpd", "mgmtd", "sharpd", "ldpd", "babeld", "eigrpd",
+                "ospfd", "ospf6d", "ospfclient", "pbrd", "fpm", "pceplib", "pathd",
+        ]:
             with open(f"{i}/meson.build", "w") as fd:
-                fd.write(streams[i].getvalue())
+                fd.write(streams.pop(i).getvalue())
+
+        print("left:", ", ".join(streams.keys()))
 
         #print("\n".join(c.mvars.keys()))
 

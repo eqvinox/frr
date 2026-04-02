@@ -22,14 +22,14 @@
 #include "frrdistance.h"
 #include "lib/json.h"
 
-#include "static_vrf.h"
-#include "static_vty.h"
-#include "static_routes.h"
-#include "static_debug.h"
+#include "staticd/static_vrf.h"
+#include "staticd/static_vty.h"
+#include "staticd/static_routes.h"
+#include "staticd/static_debug.h"
 #include "staticd/static_vty_clippy.c"
-#include "static_nb.h"
-#include "static_srv6.h"
-#include "static_zebra.h"
+#include "staticd/static_nb.h"
+#include "staticd/static_srv6.h"
+#include "staticd/static_zebra.h"
 
 #define STATICD_STR "Static route daemon\n"
 

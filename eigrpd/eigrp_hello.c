@@ -30,6 +30,8 @@
 #include "vty.h"
 #include "md5.h"
 
+#include "lib/version.h"
+
 #include "eigrpd/eigrp_structs.h"
 #include "eigrpd/eigrpd.h"
 #include "eigrpd/eigrp_interface.h"
@@ -418,7 +420,7 @@ uint32_t FRR_MINOR;
 
 void eigrp_sw_version_initialize(void)
 {
-	char ver_string[] = VERSION;
+	char ver_string[] = FRR_VER_SHORT;
 	char *dash = strstr(ver_string, "-");
 	int ret;
 
@@ -430,7 +432,7 @@ void eigrp_sw_version_initialize(void)
 	if (ret != 2)
 		flog_err(EC_EIGRP_PACKET,
 			 "Did not Properly parse %s, please fix VERSION string",
-			 VERSION);
+			 FRR_VER_SHORT);
 }
 
 /**

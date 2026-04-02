@@ -11,11 +11,15 @@
 
 #include "lib/jhash.h"
 #include "lib/log.h"
-#include "lib/prefix.h" /* s6_addr32 */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* glibc defines s6_addr32 to __in6_u.__u6_addr32 if __USE_{MISC || GNU} */
+#ifndef s6_addr32
+#define s6_addr32 __u6_addr.__u6_addr32
+#endif /*s6_addr32*/
 
 /*
  * Generic IP address - union of IPv4 and IPv6 address.
