@@ -1,5 +1,6 @@
 #!/usr/bin/env perl
-# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-License-Identifier: GPL-2.0
+# DO NOT CHANGE THIS TO GPL-2.0-or-later!  (Original kernel file is GPL-2.0!)
 #
 # (c) 2001, Dave Jones. (the file handling bit)
 # (c) 2005, Joel Schopp <jschopp@austin.ibm.com> (the ugly bit)
