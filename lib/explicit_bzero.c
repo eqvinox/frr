@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
-
 /*
  * Public domain.
  * Written by Matthew Dempsky.
